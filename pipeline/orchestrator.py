@@ -1,7 +1,7 @@
 """
 Orchestrator — Phase 2
 Runs the complete pipeline:
-  1. Collect events from GDELT (gdelt_collector)
+  1. Collect events from GDELT daily exports (gdelt_collector)
   2. Enrich hotspots with articles (article_enricher)
   3. Write final JSON output for the frontend
 
@@ -22,8 +22,15 @@ from article_enricher import enrich
 
 # ── Configuration ───────────────────────────────────────────────
 CONFIG = {
-    # Minimum number of unique sources for an event to be included
+    # Minimum number of unique sources for an event to be included.
+    # 5 is a good balance: filters noise but keeps global coverage.
     "min_sources": int(os.environ.get("NEWSMAP_MIN_SOURCES", "5")),
+
+    # How far back to look for events (hours). 36h covers ~1.5 news cycles.
+    "max_age_hours": int(os.environ.get("NEWSMAP_MAX_AGE_HOURS", "36")),
+
+    # Number of daily export files to fetch (3 days covers the 36h window fully).
+    "num_days": int(os.environ.get("NEWSMAP_NUM_DAYS", "3")),
 
     # Maximum hotspots to enrich with external articles (RSS/Guardian)
     "max_enrich": int(os.environ.get("NEWSMAP_MAX_ENRICH", "50")),
@@ -51,7 +58,11 @@ def run_pipeline():
     print()
 
     # ── Step 1: Collect from GDELT ──
-    hotspots = collect(min_sources=CONFIG["min_sources"])
+    hotspots = collect(
+        min_sources=CONFIG["min_sources"],
+        max_age_hours=CONFIG["max_age_hours"],
+        num_days=CONFIG["num_days"],
+    )
 
     if not hotspots:
         print("\n✗ No hotspots collected. Check GDELT availability.")
@@ -115,6 +126,7 @@ def format_output(hotspots, timestamp):
             "avgTone": h["avgTone"],
             "avgGoldstein": h.get("avgGoldstein", 0),
             "eventCount": h.get("eventCount", 1),
+            "hoursAgo": h.get("hoursAgo"),
             "articles": articles,
         })
 
@@ -133,6 +145,7 @@ def write_output(data, timestamp):
         "generated_at": timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "hotspot_count": len(data),
         "min_sources_threshold": CONFIG["min_sources"],
+        "max_age_hours": CONFIG["max_age_hours"],
         "hotspots": data,
     }
 
