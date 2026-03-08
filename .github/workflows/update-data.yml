@@ -2,8 +2,9 @@ name: Update World News Map
 
 on:
   schedule:
+    # Run every 30 minutes
     - cron: '*/30 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Allow manual trigger
 
 permissions:
   contents: write
@@ -25,10 +26,14 @@ jobs:
       - name: Run pipeline
         env:
           NEWSMAP_MIN_SOURCES: '5'
+          NEWSMAP_MAX_AGE_HOURS: '36'
+          NEWSMAP_NUM_DAYS: '3'
           NEWSMAP_MAX_ENRICH: '40'
           NEWSMAP_MAX_HOTSPOTS: '200'
           NEWSMAP_OUTPUT: 'data/live.json'
           NEWSMAP_RSS_DELAY: '1.5'
+          # Uncomment and add your Guardian API key as a repository secret:
+          # GUARDIAN_API_KEY: ${{ secrets.GUARDIAN_API_KEY }}
         run: |
           cd pipeline
           python orchestrator.py
