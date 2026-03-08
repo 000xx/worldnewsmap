@@ -252,16 +252,19 @@ def safe_int(val, default=0):
 
 # ── Fetching Daily Export Files ─────────────────────────────────
 
-def get_daily_export_urls(num_days=3):
+def get_daily_export_urls(num_days=5):
     """
     Build URLs for GDELT daily export files.
     Format: http://data.gdeltproject.org/events/YYYYMMDD.export.CSV.zip
-    Daily files are posted each morning covering the previous day.
-    We grab 3 days to ensure full 36-hour coverage.
+
+    IMPORTANT: GDELT posts each day's file the NEXT morning around 6AM EST.
+    So "today's" file doesn't exist yet. We start from yesterday and go back.
+    We try 5 days to ensure we get at least 2 successful downloads even if
+    some files 404 due to timing.
     """
     now = datetime.now(timezone.utc)
     urls = []
-    for offset in range(0, num_days):
+    for offset in range(1, num_days + 1):  # Start from 1 (yesterday), not 0 (today)
         day = now - timedelta(days=offset)
         stamp = day.strftime("%Y%m%d")
         urls.append(f"http://data.gdeltproject.org/events/{stamp}.export.CSV.zip")
@@ -286,31 +289,36 @@ def fetch_daily_export(url):
         return None, str(e)
 
 
-def fetch_gdelt_daily(num_days=3):
+def fetch_gdelt_daily(num_days=5, target_files=2):
     """
-    Fetch daily export files for the last N days and merge all rows.
-    Returns combined rows from all successful downloads.
+    Fetch daily export files, trying up to num_days back.
+    Stops after successfully downloading target_files.
+    Returns list of (file_date_str, rows) tuples.
     """
     urls = get_daily_export_urls(num_days)
-    all_rows = []
+    all_files = []
 
     for url in urls:
         filename = url.split("/")[-1]
+        # Extract date from filename like "20260306.export.CSV.zip"
+        file_date = filename.split(".")[0]
         print(f"  Fetching {filename}...")
         result = fetch_daily_export(url)
 
         if isinstance(result, tuple):
-            # Error case — tuple of (None, error_string)
             _, error = result
             print(f"    ✗ Failed: {error}")
         elif result is not None:
-            all_rows.extend(result)
+            all_files.append((file_date, result))
             print(f"    ✓ {len(result):,} events")
+            if len(all_files) >= target_files:
+                break
         else:
             print(f"    ✗ Failed (unknown error)")
 
-    print(f"  Total raw events: {len(all_rows):,}")
-    return all_rows
+    total = sum(len(rows) for _, rows in all_files)
+    print(f"  Total: {total:,} events from {len(all_files)} files")
+    return all_files
 
 
 # ── Parsing and Filtering ───────────────────────────────────────
@@ -347,105 +355,106 @@ def recency_weight(event_time, now, half_life_hours=12):
     return math.pow(0.5, age_hours / half_life_hours)
 
 
-def parse_events(rows, min_sources=5, max_age_hours=36):
+def parse_events(file_data, min_sources=5):
     """
     Parse raw GDELT rows into structured event dicts.
-    Auto-detects V1 vs V2 column format based on row length.
+    file_data is a list of (file_date_str, rows) tuples from fetch_gdelt_daily.
+
+    Uses the file date for recency weighting instead of DATEADDED,
+    since daily export files cover one day each and DATEADDED can be unreliable.
+
     Filters:
       - Must have action geo coordinates (not 0,0)
       - NumSources >= min_sources
-      - Event occurred within max_age_hours
     """
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=max_age_hours)
     events = []
-    filtered_age = 0
     filtered_sources = 0
     filtered_geo = 0
 
-    # Detect format from first non-empty row
-    COL = COL_V1
-    for row in rows:
-        if len(row) > 10:
-            COL = detect_format(row)
-            fmt = "V2" if COL is COL_V2 else "V1"
-            print(f"  Detected format: {fmt} ({len(row)} columns)")
-            break
+    for file_date_str, rows in file_data:
+        # Parse file date for recency weighting
+        try:
+            file_date = datetime.strptime(file_date_str, "%Y%m%d").replace(
+                hour=12, tzinfo=timezone.utc  # Assume midday for the file's events
+            )
+        except ValueError:
+            file_date = now - timedelta(days=1)
 
-    for row in rows:
-        if len(row) < 56:
-            continue
+        file_weight = recency_weight(file_date, now)
 
-        # Parse timestamp and check age
-        date_added = ""
-        if len(row) > COL["DATEADDED"]:
-            date_added = row[COL["DATEADDED"]].strip()
-        event_time = parse_event_time(date_added)
-        if event_time and event_time < cutoff:
-            filtered_age += 1
-            continue
+        # Detect format from first row
+        COL = COL_V1
+        for row in rows:
+            if len(row) > 10:
+                COL = detect_format(row)
+                break
 
-        # Check source count
-        num_sources = safe_int(row[COL["NumSources"]])
-        if num_sources < min_sources:
-            filtered_sources += 1
-            continue
+        fmt = "V2" if COL is COL_V2 else "V1"
+        print(f"  Processing {file_date_str} ({len(rows):,} rows, format {fmt}, recency weight {file_weight:.2f})")
 
-        # Check geo coordinates
-        lat = safe_float(row[COL["ActionGeo_Lat"]])
-        lng = safe_float(row[COL["ActionGeo_Long"]])
-        if lat == 0.0 and lng == 0.0:
-            filtered_geo += 1
-            continue
+        for row in rows:
+            if len(row) < 56:
+                continue
 
-        event_code = row[COL["EventCode"]].strip()
-        goldstein = safe_float(row[COL["GoldsteinScale"]])
-        avg_tone = safe_float(row[COL["AvgTone"]])
+            # Check source count
+            num_sources = safe_int(row[COL["NumSources"]])
+            if num_sources < min_sources:
+                filtered_sources += 1
+                continue
 
-        categories = classify_event(event_code, goldstein, avg_tone)
+            # Check geo coordinates
+            lat = safe_float(row[COL["ActionGeo_Lat"]])
+            lng = safe_float(row[COL["ActionGeo_Long"]])
+            if lat == 0.0 and lng == 0.0:
+                filtered_geo += 1
+                continue
 
-        geo_name = row[COL["ActionGeo_FullName"]].strip()
-        country_code = row[COL["ActionGeo_CountryCode"]].strip()
+            event_code = row[COL["EventCode"]].strip()
+            goldstein = safe_float(row[COL["GoldsteinScale"]])
+            avg_tone = safe_float(row[COL["AvgTone"]])
 
-        # Parse city and country from FullName (format: "City, State, Country")
-        parts = [p.strip() for p in geo_name.split(",")]
-        city = parts[0] if parts else geo_name
-        country = parts[-1] if len(parts) > 1 else country_code
+            categories = classify_event(event_code, goldstein, avg_tone)
 
-        # Calculate recency weight for this event
-        weight = recency_weight(event_time, now)
+            geo_name = row[COL["ActionGeo_FullName"]].strip()
+            country_code = row[COL["ActionGeo_CountryCode"]].strip()
 
-        source_url = ""
-        if len(row) > COL["SOURCEURL"]:
-            source_url = row[COL["SOURCEURL"]].strip()
+            # Parse city and country from FullName (format: "City, State, Country")
+            parts = [p.strip() for p in geo_name.split(",")]
+            city = parts[0] if parts else geo_name
+            country = parts[-1] if len(parts) > 1 else country_code
 
-        events.append({
-            "id": row[COL["GlobalEventID"]],
-            "lat": lat,
-            "lng": lng,
-            "city": city,
-            "country": country,
-            "country_code": country_code,
-            "geo_name": geo_name,
-            "event_code": event_code,
-            "quad_class": safe_int(row[COL["QuadClass"]]),
-            "goldstein": goldstein,
-            "num_mentions": safe_int(row[COL["NumMentions"]]),
-            "num_sources": num_sources,
-            "num_articles": safe_int(row[COL["NumArticles"]]),
-            "avg_tone": avg_tone,
-            "categories": categories,
-            "source_url": source_url,
-            "is_root": safe_int(row[COL["IsRootEvent"]]),
-            "actor1_name": row[COL["Actor1Name"]].strip(),
-            "actor2_name": row[COL["Actor2Name"]].strip(),
-            "date_added": date_added,
-            "event_time": event_time,
-            "recency_weight": weight,
-        })
+            source_url = ""
+            if len(row) > COL["SOURCEURL"]:
+                source_url = row[COL["SOURCEURL"]].strip()
 
-    print(f"  ✓ Parsed {len(events):,} events within last {max_age_hours}h (min {min_sources} sources)")
-    print(f"    Filtered: {filtered_age:,} too old, {filtered_sources:,} too few sources, {filtered_geo:,} no geo")
+            events.append({
+                "id": row[COL["GlobalEventID"]],
+                "lat": lat,
+                "lng": lng,
+                "city": city,
+                "country": country,
+                "country_code": country_code,
+                "geo_name": geo_name,
+                "event_code": event_code,
+                "quad_class": safe_int(row[COL["QuadClass"]]),
+                "goldstein": goldstein,
+                "num_mentions": safe_int(row[COL["NumMentions"]]),
+                "num_sources": num_sources,
+                "num_articles": safe_int(row[COL["NumArticles"]]),
+                "avg_tone": avg_tone,
+                "categories": categories,
+                "source_url": source_url,
+                "is_root": safe_int(row[COL["IsRootEvent"]]),
+                "actor1_name": row[COL["Actor1Name"]].strip(),
+                "actor2_name": row[COL["Actor2Name"]].strip(),
+                "date_added": file_date_str,
+                "event_time": file_date,
+                "recency_weight": file_weight,
+            })
+
+    print(f"  ✓ Parsed {len(events):,} events (min {min_sources} sources)")
+    print(f"    Filtered: {filtered_sources:,} too few sources, {filtered_geo:,} no geo")
     return events
 
 
@@ -563,24 +572,23 @@ def collect(min_sources=5, max_age_hours=36, num_days=3):
 
     Args:
         min_sources: Minimum NumSources for an event (default 5).
-        max_age_hours: Only include events from the last N hours (default 36).
-        num_days: Number of daily export files to fetch (default 3 to cover 36h).
+        max_age_hours: Not used for filtering anymore (kept for config compat).
+        num_days: Target number of daily files to successfully fetch (default 3).
     """
     print("[GDELT Collector]")
-    print(f"  Strategy: last {max_age_hours} hours, min {min_sources} sources per event")
-    print(f"  Fetching {num_days} daily export files...")
+    print(f"  Strategy: last {num_days} available daily files, min {min_sources} sources per event")
     print()
 
-    rows = fetch_gdelt_daily(num_days)
-    if not rows:
+    file_data = fetch_gdelt_daily(num_days=5, target_files=num_days)
+    if not file_data:
         return []
 
     print()
-    events = parse_events(rows, min_sources=min_sources, max_age_hours=max_age_hours)
+    events = parse_events(file_data, min_sources=min_sources)
     if not events:
         # Retry with lower threshold
-        print(f"  No events at {min_sources}+ sources. Retrying with min_sources=2...")
-        events = parse_events(rows, min_sources=2, max_age_hours=max_age_hours)
+        print(f"\n  No events at {min_sources}+ sources. Retrying with min_sources=2...")
+        events = parse_events(file_data, min_sources=2)
         if not events:
             return []
 
