@@ -753,7 +753,9 @@ async function loadData() {
   if (CONFIG.dataURL) {
     try {
       const res = await fetch(CONFIG.dataURL + '?t=' + Date.now());
-      const data = await res.json();
+      const raw = await res.json();
+      // Data is wrapped in an envelope with a "hotspots" key
+      const data = raw.hotspots || raw;
       // Apply minimum sources filter
       hotspotData = data.filter(d => d.numSources >= CONFIG.minSources);
     } catch (err) {
