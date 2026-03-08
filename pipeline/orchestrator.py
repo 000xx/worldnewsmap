@@ -70,12 +70,10 @@ def run_pipeline():
         write_output([], start_time)
         return
 
-    print(f"\n  Total hotspots: {len(hotspots)}")
+    print(f"\n  Total events: {len(hotspots):,}")
 
-    # Trim to max
-    hotspots = hotspots[:CONFIG["max_hotspots"]]
-
-    # ── Step 2: Enrich with articles ──
+    # ── Step 2: Enrich top hotspots with articles ──
+    # Only enrich top N with RSS/Guardian (too slow for all 60k)
     print()
     hotspots = enrich(
         hotspots,
@@ -98,12 +96,12 @@ def run_pipeline():
 def format_output(hotspots, timestamp):
     """
     Format hotspots into the final JSON structure expected by the frontend.
-    Cleans up internal fields and ensures consistent schema.
+    Each hotspot is one GDELT event.
     """
     output = []
 
     for h in hotspots:
-        # Build articles list, ensuring all have required fields
+        # Build articles list if present
         articles = []
         for a in h.get("articles", []):
             articles.append({
@@ -113,7 +111,23 @@ def format_output(hotspots, timestamp):
                 "lang": a.get("lang", "en"),
             })
 
-        output.append({
+        # Source URLs as fallback article links
+        if not articles:
+            for url in h.get("sourceUrls", [])[:1]:
+                try:
+                    import urllib.parse
+                    domain = urllib.parse.urlparse(url).netloc
+                    domain = domain.replace("www.", "")
+                except Exception:
+                    domain = "Source"
+                articles.append({
+                    "title": f"Read full report",
+                    "url": url,
+                    "source": domain,
+                    "lang": "en",
+                })
+
+        entry = {
             "lat": h["lat"],
             "lng": h["lng"],
             "city": h["city"],
@@ -127,9 +141,10 @@ def format_output(hotspots, timestamp):
             "avgGoldstein": h.get("avgGoldstein", 0),
             "eventCount": h.get("eventCount", 1),
             "hoursAgo": h.get("hoursAgo"),
-            "topics": h.get("topics", []),
+            "summary": h.get("summary", ""),
             "articles": articles,
-        })
+        }
+        output.append(entry)
 
     return output
 
