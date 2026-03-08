@@ -127,6 +127,7 @@ def format_output(hotspots, timestamp):
             "avgGoldstein": h.get("avgGoldstein", 0),
             "eventCount": h.get("eventCount", 1),
             "hoursAgo": h.get("hoursAgo"),
+            "topics": h.get("topics", []),
             "articles": articles,
         })
 
