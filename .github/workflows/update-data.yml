@@ -30,7 +30,7 @@ jobs:
           NEWSMAP_NUM_DAYS: '3'
           NEWSMAP_MAX_ENRICH: '40'
           NEWSMAP_MAX_HOTSPOTS: '200'
-          NEWSMAP_OUTPUT: 'data/live.json'
+          NEWSMAP_OUTPUT: '../data/live.json'
           NEWSMAP_RSS_DELAY: '1.5'
           # Uncomment and add your Guardian API key as a repository secret:
           # GUARDIAN_API_KEY: ${{ secrets.GUARDIAN_API_KEY }}
