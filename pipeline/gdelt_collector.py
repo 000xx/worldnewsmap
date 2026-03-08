@@ -460,94 +460,228 @@ def parse_events(file_data, min_sources=5):
 
 # ── Clustering ──────────────────────────────────────────────────
 
+# Human-readable descriptions for CAMEO root codes
+CAMEO_DESCRIPTIONS = {
+    "01": "public statements",
+    "02": "appeals",
+    "03": "cooperation intent",
+    "04": "diplomatic consultations",
+    "05": "diplomatic cooperation",
+    "06": "material cooperation",
+    "07": "aid provision",
+    "08": "concessions",
+    "09": "investigations",
+    "10": "demands",
+    "11": "disapproval",
+    "12": "rejections",
+    "13": "threats",
+    "14": "protests",
+    "15": "military posturing",
+    "16": "reduced relations",
+    "17": "coercion",
+    "18": "assault",
+    "19": "military force",
+    "20": "mass violence",
+}
+
+CATEGORY_LABELS = {
+    "conflict": "Conflict & Security",
+    "politics": "Politics & Governance",
+    "economy": "Economy & Trade",
+    "environment": "Environment & Climate",
+    "humanitarian": "Humanitarian Crisis",
+    "health": "Health & Medical",
+    "positive": "Positive Developments",
+}
+
+TONE_WORDS = {
+    (-10, -5): "intense",
+    (-5, -2): "concerning",
+    (-2, 2): "measured",
+    (2, 5): "encouraging",
+    (5, 10): "strongly positive",
+}
+
+
+def get_tone_word(tone):
+    for (lo, hi), word in TONE_WORDS.items():
+        if lo <= tone < hi:
+            return word
+    return "notable"
+
+
+def generate_summary(topic_cluster):
+    """
+    Generate a human-readable summary line for a topic cluster.
+    Uses actor names, event types, and tone to describe what's happening.
+    """
+    events = topic_cluster["events"]
+    category = topic_cluster["primary_category"]
+    n = len(events)
+    total_sources = topic_cluster["total_sources"]
+    avg_tone = topic_cluster["tone_sum"] / n if n > 0 else 0
+    tone_word = get_tone_word(avg_tone)
+
+    # Find most common actors
+    actor_counts = defaultdict(int)
+    event_type_counts = defaultdict(int)
+    for ev in events:
+        if ev["actor1_name"]:
+            actor_counts[ev["actor1_name"].title()] += 1
+        if ev["actor2_name"]:
+            actor_counts[ev["actor2_name"].title()] += 1
+        root = ev["event_code"][:2]
+        if root in CAMEO_DESCRIPTIONS:
+            event_type_counts[CAMEO_DESCRIPTIONS[root]] += 1
+
+    # Top actors (filter out generic ones)
+    skip_actors = {"", "United States", "China", "Russia"}  # Too generic at global scale
+    top_actors = [a for a, _ in sorted(actor_counts.items(), key=lambda x: -x[1])
+                  if a not in skip_actors][:3]
+
+    # Top event types
+    top_types = [t for t, _ in sorted(event_type_counts.items(), key=lambda x: -x[1])][:2]
+
+    cat_label = CATEGORY_LABELS.get(category, category.title())
+
+    # Build summary
+    parts = []
+    if top_types:
+        parts.append(f"{cat_label} — {', '.join(top_types)}")
+    else:
+        parts.append(cat_label)
+
+    if top_actors:
+        parts.append(f"involving {', '.join(top_actors[:2])}")
+
+    parts.append(f"({total_sources} sources, {tone_word} coverage)")
+
+    return " ".join(parts)
+
+
 def cluster_events(events, precision=1):
     """
-    Group events by rounded coordinates to merge nearby events into hotspots.
-    precision=1 means round to 1 decimal place (~11km clusters).
-    Intensity is weighted by recency — newer events contribute more.
+    Group events by rounded coordinates AND primary category.
+    This means one location can have multiple hotspots (one per topic).
+    Then merge into location-level hotspots with topic sub-clusters.
     """
-    clusters = defaultdict(lambda: {
+    # Step 1: Cluster by location + category
+    topic_clusters = defaultdict(lambda: {
         "events": [],
-        "lat_sum": 0, "lng_sum": 0,
         "total_sources": 0, "total_mentions": 0, "total_articles": 0,
-        "weighted_sources": 0,  # Recency-weighted source count
+        "weighted_sources": 0,
         "tone_sum": 0, "goldstein_sum": 0,
-        "categories": defaultdict(int),
         "source_urls": [],
-        "cities": defaultdict(int),
-        "countries": defaultdict(int),
-        "newest_time": None,
     })
 
     for ev in events:
-        key = (round(ev["lat"], precision), round(ev["lng"], precision))
-        c = clusters[key]
+        loc_key = (round(ev["lat"], precision), round(ev["lng"], precision))
+        primary_cat = ev["categories"][0]
+        key = (loc_key, primary_cat)
+        c = topic_clusters[key]
         c["events"].append(ev)
-        c["lat_sum"] += ev["lat"]
-        c["lng_sum"] += ev["lng"]
         c["total_sources"] += ev["num_sources"]
         c["total_mentions"] += ev["num_mentions"]
         c["total_articles"] += ev["num_articles"]
         c["weighted_sources"] += ev["num_sources"] * ev["recency_weight"]
         c["tone_sum"] += ev["avg_tone"]
         c["goldstein_sum"] += ev["goldstein"]
-        for cat in ev["categories"]:
-            c["categories"][cat] += 1
         if ev["source_url"]:
             c["source_urls"].append(ev["source_url"])
-        c["cities"][ev["city"]] += 1
-        c["countries"][ev["country"]] += 1
 
-        # Track newest event in cluster
-        if ev["event_time"]:
-            if c["newest_time"] is None or ev["event_time"] > c["newest_time"]:
-                c["newest_time"] = ev["event_time"]
+    # Step 2: Group topic clusters by location to build location hotspots
+    location_groups = defaultdict(list)
+    for (loc_key, cat), tc in topic_clusters.items():
+        tc["primary_category"] = cat
+        tc["loc_key"] = loc_key
+        location_groups[loc_key].append(tc)
 
     hotspots = []
-    for key, c in clusters.items():
-        n = len(c["events"])
-        avg_lat = c["lat_sum"] / n
-        avg_lng = c["lng_sum"] / n
-        avg_tone = c["tone_sum"] / n
-        avg_goldstein = c["goldstein_sum"] / n
+    for loc_key, topics in location_groups.items():
+        # Sort topics by weighted_sources (most significant first)
+        topics.sort(key=lambda t: -t["weighted_sources"])
 
-        # Primary city: most frequent
-        city = max(c["cities"], key=c["cities"].get)
-        country = max(c["countries"], key=c["countries"].get)
+        # Aggregate location-level stats
+        all_events = []
+        total_sources = 0
+        total_mentions = 0
+        total_articles = 0
+        total_weighted = 0
+        all_source_urls = []
 
-        # Sorted categories by frequency
-        sorted_cats = sorted(c["categories"].items(), key=lambda x: -x[1])
-        categories = [cat for cat, _ in sorted_cats]
+        for t in topics:
+            all_events.extend(t["events"])
+            total_sources += t["total_sources"]
+            total_mentions += t["total_mentions"]
+            total_articles += t["total_articles"]
+            total_weighted += t["weighted_sources"]
+            all_source_urls.extend(t["source_urls"])
 
-        # Composite intensity using RECENCY-WEIGHTED sources
-        # weighted_sources is the core — recent events with many sources dominate
-        # |GoldsteinScale| boosts impact; |AvgTone| boosts emotional charge
+        n = len(all_events)
+        avg_lat = sum(ev["lat"] for ev in all_events) / n
+        avg_lng = sum(ev["lng"] for ev in all_events) / n
+        avg_tone = sum(ev["avg_tone"] for ev in all_events) / n
+        avg_goldstein = sum(ev["goldstein"] for ev in all_events) / n
+
+        # City/country from most frequent
+        city_counts = defaultdict(int)
+        country_counts = defaultdict(int)
+        for ev in all_events:
+            city_counts[ev["city"]] += 1
+            country_counts[ev["country"]] += 1
+        city = max(city_counts, key=city_counts.get)
+        country = max(country_counts, key=country_counts.get)
+
+        # Categories ordered by total weighted sources
+        cat_order = [t["primary_category"] for t in topics]
+
+        # Build topic summaries for the popup
+        topic_summaries = []
+        for t in topics[:5]:  # Max 5 topics per location
+            summary = generate_summary(t)
+            t_n = len(t["events"])
+            t_tone = t["tone_sum"] / t_n if t_n > 0 else 0
+            topic_summaries.append({
+                "category": t["primary_category"],
+                "summary": summary,
+                "numSources": t["total_sources"],
+                "eventCount": t_n,
+                "avgTone": round(t_tone, 2),
+                "sourceUrls": t["source_urls"][:5],
+            })
+
+        # Composite intensity
         raw_intensity = (
-            c["weighted_sources"]
+            total_weighted
             * (1 + abs(avg_goldstein) / 10)
             * (1 + abs(avg_tone) / 10)
         )
 
-        # How old is the newest event in this cluster (for display)
+        # Newest event time
+        newest = None
+        for ev in all_events:
+            if ev["event_time"] and (newest is None or ev["event_time"] > newest):
+                newest = ev["event_time"]
         hours_ago = None
-        if c["newest_time"]:
-            hours_ago = round((datetime.now(timezone.utc) - c["newest_time"]).total_seconds() / 3600, 1)
+        if newest:
+            hours_ago = round((datetime.now(timezone.utc) - newest).total_seconds() / 3600, 1)
 
         hotspots.append({
             "lat": round(avg_lat, 4),
             "lng": round(avg_lng, 4),
             "city": city,
             "country": country,
-            "categories": categories,
+            "categories": cat_order,
             "intensity_raw": raw_intensity,
-            "numSources": c["total_sources"],
-            "numMentions": c["total_mentions"],
-            "numArticles": c["total_articles"],
+            "numSources": total_sources,
+            "numMentions": total_mentions,
+            "numArticles": total_articles,
             "avgTone": round(avg_tone, 2),
             "avgGoldstein": round(avg_goldstein, 2),
             "eventCount": n,
             "hoursAgo": hours_ago,
-            "sourceUrls": c["source_urls"][:10],  # Keep top 10
+            "topics": topic_summaries,
+            "sourceUrls": all_source_urls[:10],
         })
 
     # Normalize intensity to 0-100
@@ -557,10 +691,8 @@ def cluster_events(events, precision=1):
             h["intensity"] = round((h["intensity_raw"] / max_raw) * 100) if max_raw > 0 else 0
             del h["intensity_raw"]
 
-    # Sort by intensity descending
     hotspots.sort(key=lambda h: -h["intensity"])
-
-    print(f"  ✓ Clustered into {len(hotspots):,} hotspots")
+    print(f"  ✓ Clustered into {len(hotspots):,} location hotspots with topic breakdowns")
     return hotspots
 
 
