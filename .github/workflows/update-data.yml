@@ -1,0 +1,42 @@
+name: Update World News Map
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run pipeline
+        env:
+          NEWSMAP_MIN_SOURCES: '5'
+          NEWSMAP_MAX_ENRICH: '40'
+          NEWSMAP_MAX_HOTSPOTS: '200'
+          NEWSMAP_OUTPUT: 'data/live.json'
+          NEWSMAP_RSS_DELAY: '1.5'
+        run: |
+          cd pipeline
+          python orchestrator.py
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "World News Map Bot"
+          git config user.email "bot@worldnewsmap.dev"
+          git add data/live.json
+          git diff --cached --quiet || git commit -m "Update live data $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
