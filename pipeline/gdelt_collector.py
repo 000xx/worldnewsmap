@@ -87,44 +87,153 @@ def classify_event(event_code, goldstein, avg_tone):
     return categories
 
 
-# ── GDELT Column Indices (same for 1.0 and 2.0 Event Table) ────
-COL = {
+# ── GDELT Column Indices ────────────────────────────────────────
+# V1.0 daily exports (from data.gdeltproject.org/events/) have 57-58 columns.
+# V2.0 15-min exports have 61 columns (adds ADM2Code fields for each geo).
+# The daily files we fetch are V1.0 format. Column order:
+#
+#  0  GlobalEventID
+#  1  SQLDATE
+#  2  MonthYear
+#  3  Year
+#  4  FractionDate
+#  5  Actor1Code
+#  6  Actor1Name
+#  7  Actor1CountryCode
+#  8  Actor1KnownGroupCode
+#  9  Actor1EthnicCode
+# 10  Actor1Religion1Code
+# 11  Actor1Religion2Code
+# 12  Actor1Type1Code
+# 13  Actor1Type2Code
+# 14  Actor1Type3Code
+# 15  Actor2Code
+# 16  Actor2Name
+# 17  Actor2CountryCode
+# 18  Actor2KnownGroupCode
+# 19  Actor2EthnicCode
+# 20  Actor2Religion1Code
+# 21  Actor2Religion2Code
+# 22  Actor2Type1Code
+# 23  Actor2Type2Code
+# 24  Actor2Type3Code
+# 25  IsRootEvent
+# 26  EventCode
+# 27  EventBaseCode
+# 28  EventRootCode
+# 29  QuadClass
+# 30  GoldsteinScale
+# 31  NumMentions
+# 32  NumSources
+# 33  NumArticles
+# 34  AvgTone
+# 35  Actor1Geo_Type
+# 36  Actor1Geo_FullName
+# 37  Actor1Geo_CountryCode
+# 38  Actor1Geo_ADM1Code
+# 39  Actor1Geo_Lat
+# 40  Actor1Geo_Long
+# 41  Actor1Geo_FeatureID
+# 42  Actor2Geo_Type
+# 43  Actor2Geo_FullName
+# 44  Actor2Geo_CountryCode
+# 45  Actor2Geo_ADM1Code
+# 46  Actor2Geo_Lat
+# 47  Actor2Geo_Long
+# 48  Actor2Geo_FeatureID
+# 49  ActionGeo_Type
+# 50  ActionGeo_FullName
+# 51  ActionGeo_CountryCode
+# 52  ActionGeo_ADM1Code
+# 53  ActionGeo_Lat
+# 54  ActionGeo_Long
+# 55  ActionGeo_FeatureID
+# 56  DATEADDED
+# 57  SOURCEURL  (may be absent in very old files)
+
+COL_V1 = {
     "GlobalEventID": 0,
     "Day": 1,
     "Actor1Name": 6,
     "Actor1CountryCode": 7,
     "Actor2Name": 16,
     "Actor2CountryCode": 17,
-    "IsRootEvent": 26,
-    "EventCode": 27,
-    "EventBaseCode": 28,
-    "EventRootCode": 29,
-    "QuadClass": 30,
-    "GoldsteinScale": 31,
-    "NumMentions": 32,
-    "NumSources": 33,
-    "NumArticles": 34,
-    "AvgTone": 35,
-    "Actor1Geo_Type": 36,
-    "Actor1Geo_FullName": 37,
-    "Actor1Geo_CountryCode": 38,
-    "Actor1Geo_Lat": 40,
-    "Actor1Geo_Long": 41,
+    "IsRootEvent": 25,
+    "EventCode": 26,
+    "EventBaseCode": 27,
+    "EventRootCode": 28,
+    "QuadClass": 29,
+    "GoldsteinScale": 30,
+    "NumMentions": 31,
+    "NumSources": 32,
+    "NumArticles": 33,
+    "AvgTone": 34,
+    "Actor1Geo_Type": 35,
+    "Actor1Geo_FullName": 36,
+    "Actor1Geo_CountryCode": 37,
+    "Actor1Geo_Lat": 39,
+    "Actor1Geo_Long": 40,
     "Actor2Geo_Type": 42,
     "Actor2Geo_FullName": 43,
     "Actor2Geo_CountryCode": 44,
     "Actor2Geo_Lat": 46,
     "Actor2Geo_Long": 47,
-    "ActionGeo_Type": 48,
-    "ActionGeo_FullName": 49,
-    "ActionGeo_CountryCode": 50,
-    "ActionGeo_ADM1Code": 51,
-    "ActionGeo_Lat": 52,
-    "ActionGeo_Long": 53,
-    "ActionGeo_FeatureID": 54,
-    "DATEADDED": 55,
+    "ActionGeo_Type": 49,
+    "ActionGeo_FullName": 50,
+    "ActionGeo_CountryCode": 51,
+    "ActionGeo_ADM1Code": 52,
+    "ActionGeo_Lat": 53,
+    "ActionGeo_Long": 54,
+    "ActionGeo_FeatureID": 55,
+    "DATEADDED": 56,
     "SOURCEURL": 57,
 }
+
+# V2.0 has 3 extra ADM2Code columns (one per geo section), shifting indices
+COL_V2 = {
+    "GlobalEventID": 0,
+    "Day": 1,
+    "Actor1Name": 6,
+    "Actor1CountryCode": 7,
+    "Actor2Name": 16,
+    "Actor2CountryCode": 17,
+    "IsRootEvent": 25,
+    "EventCode": 26,
+    "EventBaseCode": 27,
+    "EventRootCode": 28,
+    "QuadClass": 29,
+    "GoldsteinScale": 30,
+    "NumMentions": 31,
+    "NumSources": 32,
+    "NumArticles": 33,
+    "AvgTone": 34,
+    "Actor1Geo_Type": 35,
+    "Actor1Geo_FullName": 36,
+    "Actor1Geo_CountryCode": 37,
+    "Actor1Geo_Lat": 40,
+    "Actor1Geo_Long": 41,
+    "Actor2Geo_Type": 43,
+    "Actor2Geo_FullName": 44,
+    "Actor2Geo_CountryCode": 45,
+    "Actor2Geo_Lat": 48,
+    "Actor2Geo_Long": 49,
+    "ActionGeo_Type": 51,
+    "ActionGeo_FullName": 52,
+    "ActionGeo_CountryCode": 53,
+    "ActionGeo_ADM1Code": 54,
+    "ActionGeo_Lat": 56,
+    "ActionGeo_Long": 57,
+    "ActionGeo_FeatureID": 58,
+    "DATEADDED": 59,
+    "SOURCEURL": 60,
+}
+
+
+def detect_format(row):
+    """Detect whether a row is V1 (57-58 cols) or V2 (61 cols) format."""
+    if len(row) >= 61:
+        return COL_V2
+    return COL_V1
 
 
 def safe_float(val, default=0.0):
@@ -241,6 +350,7 @@ def recency_weight(event_time, now, half_life_hours=12):
 def parse_events(rows, min_sources=5, max_age_hours=36):
     """
     Parse raw GDELT rows into structured event dicts.
+    Auto-detects V1 vs V2 column format based on row length.
     Filters:
       - Must have action geo coordinates (not 0,0)
       - NumSources >= min_sources
@@ -253,12 +363,23 @@ def parse_events(rows, min_sources=5, max_age_hours=36):
     filtered_sources = 0
     filtered_geo = 0
 
+    # Detect format from first non-empty row
+    COL = COL_V1
+    for row in rows:
+        if len(row) > 10:
+            COL = detect_format(row)
+            fmt = "V2" if COL is COL_V2 else "V1"
+            print(f"  Detected format: {fmt} ({len(row)} columns)")
+            break
+
     for row in rows:
         if len(row) < 56:
             continue
 
         # Parse timestamp and check age
-        date_added = row[COL["DATEADDED"]].strip() if len(row) > COL["DATEADDED"] else ""
+        date_added = ""
+        if len(row) > COL["DATEADDED"]:
+            date_added = row[COL["DATEADDED"]].strip()
         event_time = parse_event_time(date_added)
         if event_time and event_time < cutoff:
             filtered_age += 1
