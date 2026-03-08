@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>World News Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -388,6 +390,37 @@
     #legend { bottom: 10px; left: 10px; padding: 10px 14px; }
     #info-panel { bottom: 10px; right: 10px; padding: 10px 14px; }
   }
+
+  /* ── Cluster Markers ── */
+  .marker-cluster {
+    background: rgba(59,130,246,0.25) !important;
+    border: 2px solid rgba(59,130,246,0.5) !important;
+  }
+  .marker-cluster div {
+    background: rgba(59,130,246,0.7) !important;
+    color: #fff !important;
+    font-family: 'Space Mono', monospace !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+  }
+  .marker-cluster-small {
+    background: rgba(59,130,246,0.2) !important;
+  }
+  .marker-cluster-small div {
+    background: rgba(59,130,246,0.6) !important;
+  }
+  .marker-cluster-medium {
+    background: rgba(245,158,11,0.2) !important;
+  }
+  .marker-cluster-medium div {
+    background: rgba(245,158,11,0.6) !important;
+  }
+  .marker-cluster-large {
+    background: rgba(239,68,68,0.25) !important;
+  }
+  .marker-cluster-large div {
+    background: rgba(239,68,68,0.7) !important;
+  }
 </style>
 </head>
 <body>
@@ -456,6 +489,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 // ══════════════════════════════════════════════════
 // CONFIG
@@ -692,83 +726,57 @@ function renderMarkers(data, filter) {
   // Update stats
   const countries = new Set(filtered.map(d => d.country));
   const totalSources = filtered.reduce((s, d) => s + d.numSources, 0);
-  document.getElementById('stat-hotspots').textContent = filtered.length;
+  document.getElementById('stat-hotspots').textContent = filtered.length.toLocaleString();
   document.getElementById('stat-sources').textContent = totalSources.toLocaleString();
   document.getElementById('stat-countries').textContent = countries.size;
 
-  filtered.forEach((spot, i) => {
+  // Use MarkerClusterGroup for performance with thousands of markers
+  const clusterGroup = L.markerClusterGroup({
+    maxClusterRadius: 40,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    zoomToBoundsOnClick: true,
+    disableClusteringAtZoom: 10,
+    chunkedLoading: true,
+    chunkInterval: 100,
+    chunkDelay: 10,
+  });
+
+  const markers = [];
+  filtered.forEach((spot) => {
     const colors = getColor(spot.intensity, spot.categories);
     const radius = getRadius(spot.intensity);
 
-    // Outer glow ring
-    const glowMarker = L.circleMarker([spot.lat, spot.lng], {
-      radius: radius * 1.8,
+    // Core dot only (no glow rings for individual events — too many)
+    const marker = L.circleMarker([spot.lat, spot.lng], {
+      radius: Math.max(radius * 0.5, 4), // Smaller dots since there are thousands
       fillColor: colors.base,
-      fillOpacity: 0.08,
-      stroke: false,
-      interactive: false,
-    });
-    markersLayer.addLayer(glowMarker);
-
-    // Middle ring
-    const midMarker = L.circleMarker([spot.lat, spot.lng], {
-      radius: radius * 1.2,
-      fillColor: colors.base,
-      fillOpacity: 0.15,
-      stroke: false,
-      interactive: false,
-    });
-    markersLayer.addLayer(midMarker);
-
-    // Core dot
-    const coreMarker = L.circleMarker([spot.lat, spot.lng], {
-      radius: radius,
-      fillColor: colors.base,
-      fillOpacity: 0.7,
+      fillOpacity: 0.65,
       color: colors.base,
-      weight: 1.5,
-      opacity: 0.9,
+      weight: 1,
+      opacity: 0.8,
     });
 
-    // Build popup with topic groupings
+    // Build popup with summary
     const badgeColor = CAT_COLORS[spot.categories[0]]?.base || DEFAULT_COLOR.base;
-
     const toneLabel = spot.avgTone > 2 ? '▲ Positive' : spot.avgTone < -2 ? '▼ Negative' : '● Neutral';
     const toneColor = spot.avgTone > 2 ? '#22d3ee' : spot.avgTone < -2 ? '#ef4444' : '#8896b0';
 
-    // Topic sections
-    const topics = spot.topics || [];
-    let topicsHTML = '';
-    if (topics.length > 0) {
-      topicsHTML = topics.map(t => {
-        const tCatColor = CAT_COLORS[t.category]?.base || DEFAULT_COLOR.base;
-        const tToneLabel = t.avgTone > 2 ? '▲' : t.avgTone < -2 ? '▼' : '●';
-        const tToneColor = t.avgTone > 2 ? '#22d3ee' : t.avgTone < -2 ? '#ef4444' : '#8896b0';
-        return `
-          <div class="popup-topic">
-            <div class="popup-topic-header">
-              <span class="popup-badge" style="background:${tCatColor};font-size:9px;padding:1px 6px;">
-                ${t.category}
-              </span>
-              <span style="font-size:10px;color:var(--text-muted);">${t.numSources} sources</span>
-              <span style="font-size:10px;color:${tToneColor};">${tToneLabel}</span>
-            </div>
-            <div class="popup-topic-summary">${t.summary}</div>
-          </div>`;
-      }).join('');
-    }
+    // Summary line
+    const summaryHTML = spot.summary
+      ? `<div class="popup-topic-summary" style="margin-bottom:10px;">${spot.summary}</div>`
+      : '';
 
     // Article links
     const articles = spot.articles || [];
     let articlesHTML = '';
     if (articles.length > 0) {
-      const articleItems = articles.map(a => `
+      const items = articles.map(a => `
         <li>
           <a href="${a.url}" target="_blank" rel="noopener">${a.title}</a>
           <div class="popup-source">${a.source}${a.lang !== 'en' ? ' · ' + a.lang.toUpperCase() : ''}</div>
-        </li>
-      `).join('');
-      articlesHTML = `<ul class="popup-articles">${articleItems}</ul>`;
+        </li>`).join('');
+      articlesHTML = `<ul class="popup-articles">${items}</ul>`;
     }
 
     const popup = `
@@ -783,25 +791,24 @@ function renderMarkers(data, filter) {
       </div>
       <div class="popup-stats">
         <div class="popup-stat">
-          <div class="popup-stat-value">${spot.numSources.toLocaleString()}</div>
+          <div class="popup-stat-value">${spot.numSources}</div>
           <div class="popup-stat-label">Sources</div>
-        </div>
-        <div class="popup-stat">
-          <div class="popup-stat-value">${spot.eventCount}</div>
-          <div class="popup-stat-label">Events</div>
         </div>
         <div class="popup-stat">
           <div class="popup-stat-value" style="color:${toneColor}">${toneLabel}</div>
           <div class="popup-stat-label">Tone</div>
         </div>
       </div>
-      ${topicsHTML ? '<div class="popup-topics">' + topicsHTML + '</div>' : ''}
+      ${summaryHTML}
       ${articlesHTML}
     `;
 
-    coreMarker.bindPopup(popup, { maxWidth: 340, className: '' });
-    markersLayer.addLayer(coreMarker);
+    marker.bindPopup(popup, { maxWidth: 340 });
+    markers.push(marker);
   });
+
+  clusterGroup.addLayers(markers);
+  markersLayer.addLayer(clusterGroup);
 }
 
 // ══════════════════════════════════════════════════
