@@ -237,6 +237,31 @@
     margin-top: 2px;
   }
 
+  /* ── Topic Sections ── */
+  .popup-topics {
+    margin-bottom: 10px;
+  }
+
+  .popup-topic {
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(30,45,69,0.5);
+  }
+
+  .popup-topic:last-child { border-bottom: none; }
+
+  .popup-topic-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+
+  .popup-topic-summary {
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+  }
+
   /* ── Legend ── */
   #legend {
     position: fixed;
@@ -437,9 +462,9 @@
 // ══════════════════════════════════════════════════
 const CONFIG = {
   // Set to a URL to fetch live data; null uses demo data
-  dataURL: './data/live.json', // e.g. './data/live.json'
+  dataURL: null, // e.g. './data/live.json'
   refreshInterval: 15 * 60 * 1000, // 15 minutes
-  minSources: 5, // minimum NumSources threshold for GDELT filtering
+  minSources: 2, // minimum NumSources threshold for GDELT filtering
 };
 
 // ══════════════════════════════════════════════════
@@ -625,8 +650,11 @@ function initMap() {
 // INTENSITY → VISUAL MAPPING
 // ══════════════════════════════════════════════════
 function getRadius(intensity) {
-  // intensity 0-100 → radius 6-28
-  return 6 + (intensity / 100) * 22;
+  // Logarithmic scale so top stories clearly dominate
+  // but smaller ones remain visible. sqrt gives a nice spread.
+  // intensity 1-100 → radius 5-32
+  if (intensity <= 0) return 5;
+  return 5 + Math.sqrt(intensity / 100) * 27;
 }
 
 function getColor(intensity, categories) {
@@ -702,17 +730,46 @@ function renderMarkers(data, filter) {
       opacity: 0.9,
     });
 
-    // Build popup
+    // Build popup with topic groupings
     const badgeColor = CAT_COLORS[spot.categories[0]]?.base || DEFAULT_COLOR.base;
-    const articlesList = spot.articles.map(a => `
-      <li>
-        <a href="${a.url}" target="_blank" rel="noopener">${a.title}</a>
-        <div class="popup-source">${a.source}${a.lang !== 'en' ? ' · ' + a.lang.toUpperCase() : ''}</div>
-      </li>
-    `).join('');
 
     const toneLabel = spot.avgTone > 2 ? '▲ Positive' : spot.avgTone < -2 ? '▼ Negative' : '● Neutral';
     const toneColor = spot.avgTone > 2 ? '#22d3ee' : spot.avgTone < -2 ? '#ef4444' : '#8896b0';
+
+    // Topic sections
+    const topics = spot.topics || [];
+    let topicsHTML = '';
+    if (topics.length > 0) {
+      topicsHTML = topics.map(t => {
+        const tCatColor = CAT_COLORS[t.category]?.base || DEFAULT_COLOR.base;
+        const tToneLabel = t.avgTone > 2 ? '▲' : t.avgTone < -2 ? '▼' : '●';
+        const tToneColor = t.avgTone > 2 ? '#22d3ee' : t.avgTone < -2 ? '#ef4444' : '#8896b0';
+        return `
+          <div class="popup-topic">
+            <div class="popup-topic-header">
+              <span class="popup-badge" style="background:${tCatColor};font-size:9px;padding:1px 6px;">
+                ${t.category}
+              </span>
+              <span style="font-size:10px;color:var(--text-muted);">${t.numSources} sources</span>
+              <span style="font-size:10px;color:${tToneColor};">${tToneLabel}</span>
+            </div>
+            <div class="popup-topic-summary">${t.summary}</div>
+          </div>`;
+      }).join('');
+    }
+
+    // Article links
+    const articles = spot.articles || [];
+    let articlesHTML = '';
+    if (articles.length > 0) {
+      const articleItems = articles.map(a => `
+        <li>
+          <a href="${a.url}" target="_blank" rel="noopener">${a.title}</a>
+          <div class="popup-source">${a.source}${a.lang !== 'en' ? ' · ' + a.lang.toUpperCase() : ''}</div>
+        </li>
+      `).join('');
+      articlesHTML = `<ul class="popup-articles">${articleItems}</ul>`;
+    }
 
     const popup = `
       <div class="popup-header">
@@ -726,19 +783,20 @@ function renderMarkers(data, filter) {
       </div>
       <div class="popup-stats">
         <div class="popup-stat">
-          <div class="popup-stat-value">${spot.numSources}</div>
+          <div class="popup-stat-value">${spot.numSources.toLocaleString()}</div>
           <div class="popup-stat-label">Sources</div>
         </div>
         <div class="popup-stat">
-          <div class="popup-stat-value">${spot.intensity}</div>
-          <div class="popup-stat-label">Intensity</div>
+          <div class="popup-stat-value">${spot.eventCount}</div>
+          <div class="popup-stat-label">Events</div>
         </div>
         <div class="popup-stat">
           <div class="popup-stat-value" style="color:${toneColor}">${toneLabel}</div>
           <div class="popup-stat-label">Tone</div>
         </div>
       </div>
-      <ul class="popup-articles">${articlesList}</ul>
+      ${topicsHTML ? '<div class="popup-topics">' + topicsHTML + '</div>' : ''}
+      ${articlesHTML}
     `;
 
     coreMarker.bindPopup(popup, { maxWidth: 340, className: '' });
