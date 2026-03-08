@@ -1,0 +1,8 @@
+# World News Map Pipeline
+# No external dependencies required — uses only Python standard library
+# (urllib, csv, json, xml, zipfile, io, collections, datetime, re, html, time, os, sys)
+#
+# Optional future additions:
+# feedparser          # More robust RSS parsing
+# requests            # Nicer HTTP client
+# google-cloud-bigquery  # For Phase 4 historical backfill

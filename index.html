@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>World News Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0a0e17;
+    --bg-secondary: #111827;
+    --bg-card: #1a2235;
+    --text-primary: #e8ecf4;
+    --text-secondary: #8896b0;
+    --text-muted: #4a5568;
+    --accent: #3b82f6;
+    --border: #1e2d45;
+    --cat-all: #3b82f6;
+    --cat-conflict: #ef4444;
+    --cat-politics: #8b5cf6;
+    --cat-economy: #10b981;
+    --cat-environment: #06b6d4;
+    --cat-humanitarian: #f59e0b;
+    --cat-health: #ec4899;
+    --cat-positive: #22d3ee;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ── Header ── */
+  #header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+    background: linear-gradient(180deg, rgba(10,14,23,0.97) 0%, rgba(10,14,23,0.85) 80%, rgba(10,14,23,0) 100%);
+    padding: 16px 24px 28px;
+    pointer-events: none;
+  }
+
+  #header-inner {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-icon {
+    width: 32px; height: 32px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    box-shadow: 0 0 20px rgba(59,130,246,0.3);
+  }
+
+  .logo-text {
+    font-family: 'Space Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .logo-text span { color: var(--accent); }
+
+  /* ── Category Tabs ── */
+  #categories {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .cat-btn {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.25s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .cat-btn:hover {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+  }
+
+  .cat-btn.active {
+    color: #fff;
+    border-color: transparent;
+  }
+
+  .cat-btn[data-cat="all"].active { background: var(--cat-all); box-shadow: 0 0 16px rgba(59,130,246,0.35); }
+  .cat-btn[data-cat="conflict"].active { background: var(--cat-conflict); box-shadow: 0 0 16px rgba(239,68,68,0.35); }
+  .cat-btn[data-cat="politics"].active { background: var(--cat-politics); box-shadow: 0 0 16px rgba(139,92,246,0.35); }
+  .cat-btn[data-cat="economy"].active { background: var(--cat-economy); box-shadow: 0 0 16px rgba(16,185,129,0.35); }
+  .cat-btn[data-cat="environment"].active { background: var(--cat-environment); box-shadow: 0 0 16px rgba(6,182,212,0.35); }
+  .cat-btn[data-cat="humanitarian"].active { background: var(--cat-humanitarian); box-shadow: 0 0 16px rgba(245,158,11,0.35); }
+  .cat-btn[data-cat="health"].active { background: var(--cat-health); box-shadow: 0 0 16px rgba(236,72,153,0.35); }
+  .cat-btn[data-cat="positive"].active { background: var(--cat-positive); box-shadow: 0 0 16px rgba(34,211,238,0.35); }
+
+  /* ── Map ── */
+  #map {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 1;
+    background: var(--bg-primary);
+  }
+
+  /* Dark map tiles */
+  .leaflet-tile-pane { filter: brightness(0.6) contrast(1.15) saturate(0.2) hue-rotate(180deg) invert(1); }
+  .leaflet-control-zoom { display: none; }
+  .leaflet-control-attribution { display: none !important; }
+
+  /* ── Popup Styling ── */
+  .leaflet-popup-content-wrapper {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-radius: 12px !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5) !important;
+    min-width: 260px;
+    max-width: 340px;
+  }
+
+  .leaflet-popup-tip { background: var(--bg-card) !important; border: 1px solid var(--border) !important; }
+
+  .leaflet-popup-close-button {
+    color: var(--text-secondary) !important;
+    font-size: 18px !important;
+    top: 8px !important;
+    right: 10px !important;
+  }
+
+  .popup-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .popup-city {
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .popup-country {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .popup-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .popup-stats {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .popup-stat {
+    text-align: center;
+    flex: 1;
+  }
+
+  .popup-stat-value {
+    font-family: 'Space Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .popup-stat-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .popup-articles { list-style: none; }
+
+  .popup-articles li {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(30,45,69,0.5);
+  }
+
+  .popup-articles li:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+  .popup-articles a {
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 12.5px;
+    line-height: 1.4;
+    display: block;
+    transition: color 0.2s;
+  }
+
+  .popup-articles a:hover { color: var(--accent); }
+
+  .popup-source {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  /* ── Legend ── */
+  #legend {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 1000;
+    background: rgba(26,34,53,0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 18px;
+    font-size: 11px;
+  }
+
+  #legend h4 {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+  }
+
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .legend-label { color: var(--text-secondary); }
+
+  /* ── Info Panel ── */
+  #info-panel {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    background: rgba(26,34,53,0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 18px;
+    font-size: 11px;
+    text-align: right;
+  }
+
+  #info-panel .stat-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  #info-panel .stat-value {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  #info-panel .stat-label { color: var(--text-secondary); }
+
+  #info-panel .update-time {
+    color: var(--text-muted);
+    font-size: 10px;
+    margin-top: 6px;
+  }
+
+  /* ── Loading ── */
+  #loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.6s ease;
+  }
+
+  #loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .loader {
+    width: 48px; height: 48px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .loader-text {
+    margin-top: 16px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @keyframes pulse-ring {
+    0% { transform: scale(1); opacity: 0.5; }
+    100% { transform: scale(2.2); opacity: 0; }
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    #header { padding: 10px 14px 20px; }
+    #categories { gap: 4px; }
+    .cat-btn { font-size: 10px; padding: 5px 10px; }
+    #legend { bottom: 10px; left: 10px; padding: 10px 14px; }
+    #info-panel { bottom: 10px; right: 10px; padding: 10px 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading-overlay">
+  <div class="loader"></div>
+  <div class="loader-text">Scanning the globe...</div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <div id="header-inner">
+    <div class="logo">
+      <div class="logo-icon">◉</div>
+      <div class="logo-text"><span>WORLD</span>NEWS MAP</div>
+    </div>
+    <div id="categories">
+      <button class="cat-btn active" data-cat="all">All</button>
+      <button class="cat-btn" data-cat="conflict">Conflict</button>
+      <button class="cat-btn" data-cat="politics">Politics</button>
+      <button class="cat-btn" data-cat="economy">Economy</button>
+      <button class="cat-btn" data-cat="environment">Environment</button>
+      <button class="cat-btn" data-cat="humanitarian">Humanitarian</button>
+      <button class="cat-btn" data-cat="health">Health</button>
+      <button class="cat-btn" data-cat="positive">Positive</button>
+    </div>
+  </div>
+</div>
+
+<!-- Map -->
+<div id="map"></div>
+
+<!-- Legend -->
+<div id="legend">
+  <h4>Intensity</h4>
+  <div class="legend-row">
+    <div class="legend-dot" style="background: #3b82f6; width: 8px; height: 8px;"></div>
+    <span class="legend-label">Low coverage</span>
+  </div>
+  <div class="legend-row">
+    <div class="legend-dot" style="background: #f59e0b; width: 14px; height: 14px;"></div>
+    <span class="legend-label">Moderate</span>
+  </div>
+  <div class="legend-row">
+    <div class="legend-dot" style="background: #ef4444; width: 20px; height: 20px;"></div>
+    <span class="legend-label">High attention</span>
+  </div>
+</div>
+
+<!-- Info Panel -->
+<div id="info-panel">
+  <div class="stat-row">
+    <span class="stat-label">Hotspots</span>
+    <span class="stat-value" id="stat-hotspots">0</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Sources</span>
+    <span class="stat-value" id="stat-sources">0</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Countries</span>
+    <span class="stat-value" id="stat-countries">0</span>
+  </div>
+  <div class="update-time" id="update-time">Loading...</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ══════════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════════
+const CONFIG = {
+  // Set to a URL to fetch live data; null uses demo data
+  dataURL: null, // e.g. './data/live.json'
+  refreshInterval: 15 * 60 * 1000, // 15 minutes
+  minSources: 5, // minimum NumSources threshold for GDELT filtering
+};
+
+// ══════════════════════════════════════════════════
+// CATEGORY COLOR MAP
+// ══════════════════════════════════════════════════
+const CAT_COLORS = {
+  conflict:      { base: '#ef4444', glow: 'rgba(239,68,68,0.35)' },
+  politics:      { base: '#8b5cf6', glow: 'rgba(139,92,246,0.35)' },
+  economy:       { base: '#10b981', glow: 'rgba(16,185,129,0.35)' },
+  environment:   { base: '#06b6d4', glow: 'rgba(6,182,212,0.35)' },
+  humanitarian:  { base: '#f59e0b', glow: 'rgba(245,158,11,0.35)' },
+  health:        { base: '#ec4899', glow: 'rgba(236,72,153,0.35)' },
+  positive:      { base: '#22d3ee', glow: 'rgba(34,211,238,0.35)' },
+};
+
+// Fallback for unlabeled
+const DEFAULT_COLOR = { base: '#3b82f6', glow: 'rgba(59,130,246,0.35)' };
+
+// ══════════════════════════════════════════════════
+// DEMO DATA (Phase 1 hardcoded — replaced by GDELT in Phase 2)
+// ══════════════════════════════════════════════════
+const DEMO_DATA = [
+  {
+    lat: 6.52, lng: 3.38, city: "Lagos", country: "Nigeria", categories: ["economy","politics"],
+    intensity: 72, numSources: 48, avgTone: -3.2, goldstein: -2.0,
+    articles: [
+      { title: "Nigeria's central bank holds interest rates amid inflation pressure", url: "#", source: "Reuters", lang: "en" },
+      { title: "Lagos state government unveils new infrastructure spending plan", url: "#", source: "The Guardian NG", lang: "en" },
+      { title: "Youth unemployment protests grow across Nigerian cities", url: "#", source: "Al Jazeera", lang: "en" },
+    ]
+  },
+  {
+    lat: -6.21, lng: 106.85, city: "Jakarta", country: "Indonesia", categories: ["environment","humanitarian"],
+    intensity: 58, numSources: 35, avgTone: -5.8, goldstein: -4.0,
+    articles: [
+      { title: "Severe flooding displaces thousands in Greater Jakarta area", url: "#", source: "AP", lang: "en" },
+      { title: "Indonesia ramps up disaster preparedness as monsoon intensifies", url: "#", source: "BBC", lang: "en" },
+      { title: "Environmental groups call for urban planning reform after floods", url: "#", source: "The Jakarta Post", lang: "en" },
+    ]
+  },
+  {
+    lat: -23.55, lng: -46.63, city: "São Paulo", country: "Brazil", categories: ["economy"],
+    intensity: 45, numSources: 28, avgTone: 1.2, goldstein: 3.0,
+    articles: [
+      { title: "Brazil's Bovespa index reaches record high on commodity surge", url: "#", source: "Bloomberg", lang: "en" },
+      { title: "São Paulo tech sector reports 20% growth in startup funding", url: "#", source: "TechCrunch", lang: "en" },
+    ]
+  },
+  {
+    lat: -1.29, lng: 36.82, city: "Nairobi", country: "Kenya", categories: ["politics","conflict"],
+    intensity: 63, numSources: 41, avgTone: -6.1, goldstein: -5.0,
+    articles: [
+      { title: "Kenya opposition calls for nationwide protests over tax reform", url: "#", source: "AFP", lang: "en" },
+      { title: "Security forces deployed in Nairobi ahead of planned demonstrations", url: "#", source: "Reuters", lang: "en" },
+      { title: "East African diplomatic talks resume in Kenyan capital", url: "#", source: "DW", lang: "en" },
+    ]
+  },
+  {
+    lat: 19.08, lng: 72.88, city: "Mumbai", country: "India", categories: ["economy","health"],
+    intensity: 81, numSources: 67, avgTone: -1.5, goldstein: 1.0,
+    articles: [
+      { title: "India's pharmaceutical exports hit new annual record", url: "#", source: "The Hindu", lang: "en" },
+      { title: "Mumbai stock exchange sees highest trading volume this quarter", url: "#", source: "CNBC", lang: "en" },
+      { title: "Government launches expanded rural healthcare initiative", url: "#", source: "BBC", lang: "en" },
+    ]
+  },
+  {
+    lat: 30.04, lng: 31.24, city: "Cairo", country: "Egypt", categories: ["politics","economy"],
+    intensity: 52, numSources: 33, avgTone: -2.8, goldstein: -1.5,
+    articles: [
+      { title: "Egypt negotiates new IMF loan tranche amid currency pressures", url: "#", source: "Reuters", lang: "en" },
+      { title: "Suez Canal revenues decline as Red Sea shipping routes shift", url: "#", source: "Financial Times", lang: "en" },
+    ]
+  },
+  {
+    lat: 13.76, lng: 100.50, city: "Bangkok", country: "Thailand", categories: ["positive","economy"],
+    intensity: 38, numSources: 22, avgTone: 4.5, goldstein: 5.0,
+    articles: [
+      { title: "Thailand's tourism sector reaches pre-pandemic recovery milestone", url: "#", source: "AP", lang: "en" },
+      { title: "Bangkok named among top emerging tech hubs in Southeast Asia", url: "#", source: "Nikkei Asia", lang: "en" },
+    ]
+  },
+  {
+    lat: 19.43, lng: -99.13, city: "Mexico City", country: "Mexico", categories: ["conflict","humanitarian"],
+    intensity: 55, numSources: 31, avgTone: -7.2, goldstein: -6.0,
+    articles: [
+      { title: "Cartel violence escalates in northern Mexican border states", url: "#", source: "Reuters", lang: "en" },
+      { title: "Migrant shelter capacity overwhelmed as arrivals surge", url: "#", source: "Al Jazeera", lang: "en" },
+      { title: "Government announces expanded military deployment to Sinaloa", url: "#", source: "AP", lang: "en" },
+    ]
+  },
+  {
+    lat: 23.81, lng: 90.41, city: "Dhaka", country: "Bangladesh", categories: ["environment","humanitarian"],
+    intensity: 47, numSources: 26, avgTone: -4.9, goldstein: -3.5,
+    articles: [
+      { title: "Cyclone warning issued for Bangladesh coastal regions", url: "#", source: "BBC", lang: "en" },
+      { title: "Garment worker unions demand safety reforms after factory incidents", url: "#", source: "The Guardian", lang: "en" },
+    ]
+  },
+  {
+    lat: 4.71, lng: -74.07, city: "Bogotá", country: "Colombia", categories: ["politics","positive"],
+    intensity: 42, numSources: 24, avgTone: 2.1, goldstein: 4.0,
+    articles: [
+      { title: "Colombia peace process reaches landmark implementation milestone", url: "#", source: "Reuters", lang: "en" },
+      { title: "Bogotá elected 'most innovative city' in Latin America by regional body", url: "#", source: "AFP", lang: "en" },
+    ]
+  },
+  {
+    lat: 50.45, lng: 30.52, city: "Kyiv", country: "Ukraine", categories: ["conflict"],
+    intensity: 95, numSources: 112, avgTone: -8.1, goldstein: -9.5,
+    articles: [
+      { title: "Intense fighting continues along eastern front lines", url: "#", source: "Reuters", lang: "en" },
+      { title: "Ukrainian energy grid faces renewed attacks as winter approaches", url: "#", source: "AP", lang: "en" },
+      { title: "International aid pledges renewed at European summit", url: "#", source: "BBC", lang: "en" },
+    ]
+  },
+  {
+    lat: 14.60, lng: -17.44, city: "Dakar", country: "Senegal", categories: ["politics"],
+    intensity: 35, numSources: 18, avgTone: -3.0, goldstein: -2.5,
+    articles: [
+      { title: "Senegal's new government announces sweeping reform agenda", url: "#", source: "RFI", lang: "en" },
+      { title: "West African regional bloc holds summit in Dakar", url: "#", source: "AFP", lang: "en" },
+    ]
+  },
+  {
+    lat: 35.69, lng: 51.39, city: "Tehran", country: "Iran", categories: ["politics","conflict"],
+    intensity: 68, numSources: 52, avgTone: -5.5, goldstein: -7.0,
+    articles: [
+      { title: "Nuclear negotiations stall as new sanctions take effect", url: "#", source: "Reuters", lang: "en" },
+      { title: "Regional tensions rise following military exercises near strait", url: "#", source: "Al Jazeera", lang: "en" },
+      { title: "Domestic protests continue in major Iranian cities", url: "#", source: "BBC Persian", lang: "fa" },
+    ]
+  },
+  {
+    lat: -4.04, lng: 39.67, city: "Mombasa", country: "Kenya", categories: ["environment","positive"],
+    intensity: 28, numSources: 12, avgTone: 5.3, goldstein: 3.5,
+    articles: [
+      { title: "Coral reef restoration project shows promising recovery results", url: "#", source: "Nature", lang: "en" },
+      { title: "Mombasa marine conservation zone expanded after community effort", url: "#", source: "The Guardian", lang: "en" },
+    ]
+  },
+  {
+    lat: 33.89, lng: 35.50, city: "Beirut", country: "Lebanon", categories: ["economy","humanitarian"],
+    intensity: 60, numSources: 38, avgTone: -6.8, goldstein: -5.5,
+    articles: [
+      { title: "Lebanon's banking crisis deepens as currency hits new low", url: "#", source: "Reuters", lang: "en" },
+      { title: "UN agencies warn of growing humanitarian needs in Lebanon", url: "#", source: "UNHCR", lang: "en" },
+    ]
+  },
+];
+
+// ══════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════
+let map;
+let markersLayer;
+let currentCategory = 'all';
+let hotspotData = [];
+
+// ══════════════════════════════════════════════════
+// INIT MAP
+// ══════════════════════════════════════════════════
+function initMap() {
+  map = L.map('map', {
+    center: [20, 15],
+    zoom: 3,
+    minZoom: 2,
+    maxZoom: 12,
+    zoomControl: false,
+    attributionControl: false,
+    worldCopyJump: true,
+  });
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd',
+    maxZoom: 19,
+  }).addTo(map);
+
+  markersLayer = L.layerGroup().addTo(map);
+}
+
+// ══════════════════════════════════════════════════
+// INTENSITY → VISUAL MAPPING
+// ══════════════════════════════════════════════════
+function getRadius(intensity) {
+  // intensity 0-100 → radius 6-28
+  return 6 + (intensity / 100) * 22;
+}
+
+function getColor(intensity, categories) {
+  // Use the first category's color, or blend toward red for high intensity
+  const cat = categories && categories[0];
+  const catColor = CAT_COLORS[cat] || DEFAULT_COLOR;
+
+  if (intensity > 75) {
+    return { base: lerpColor(catColor.base, '#ef4444', (intensity - 75) / 25), glow: catColor.glow };
+  }
+  return catColor;
+}
+
+function lerpColor(a, b, t) {
+  const ah = parseInt(a.replace('#',''), 16);
+  const bh = parseInt(b.replace('#',''), 16);
+  const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
+  const br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
+  const rr = Math.round(ar + (br - ar) * t);
+  const rg = Math.round(ag + (bg - ag) * t);
+  const rb = Math.round(ab + (bb - ab) * t);
+  return `#${((1 << 24) + (rr << 16) + (rg << 8) + rb).toString(16).slice(1)}`;
+}
+
+// ══════════════════════════════════════════════════
+// RENDER MARKERS
+// ══════════════════════════════════════════════════
+function renderMarkers(data, filter) {
+  markersLayer.clearLayers();
+
+  const filtered = filter === 'all'
+    ? data
+    : data.filter(d => d.categories.includes(filter));
+
+  // Update stats
+  const countries = new Set(filtered.map(d => d.country));
+  const totalSources = filtered.reduce((s, d) => s + d.numSources, 0);
+  document.getElementById('stat-hotspots').textContent = filtered.length;
+  document.getElementById('stat-sources').textContent = totalSources.toLocaleString();
+  document.getElementById('stat-countries').textContent = countries.size;
+
+  filtered.forEach((spot, i) => {
+    const colors = getColor(spot.intensity, spot.categories);
+    const radius = getRadius(spot.intensity);
+
+    // Outer glow ring
+    const glowMarker = L.circleMarker([spot.lat, spot.lng], {
+      radius: radius * 1.8,
+      fillColor: colors.base,
+      fillOpacity: 0.08,
+      stroke: false,
+      interactive: false,
+    });
+    markersLayer.addLayer(glowMarker);
+
+    // Middle ring
+    const midMarker = L.circleMarker([spot.lat, spot.lng], {
+      radius: radius * 1.2,
+      fillColor: colors.base,
+      fillOpacity: 0.15,
+      stroke: false,
+      interactive: false,
+    });
+    markersLayer.addLayer(midMarker);
+
+    // Core dot
+    const coreMarker = L.circleMarker([spot.lat, spot.lng], {
+      radius: radius,
+      fillColor: colors.base,
+      fillOpacity: 0.7,
+      color: colors.base,
+      weight: 1.5,
+      opacity: 0.9,
+    });
+
+    // Build popup
+    const badgeColor = CAT_COLORS[spot.categories[0]]?.base || DEFAULT_COLOR.base;
+    const articlesList = spot.articles.map(a => `
+      <li>
+        <a href="${a.url}" target="_blank" rel="noopener">${a.title}</a>
+        <div class="popup-source">${a.source}${a.lang !== 'en' ? ' · ' + a.lang.toUpperCase() : ''}</div>
+      </li>
+    `).join('');
+
+    const toneLabel = spot.avgTone > 2 ? '▲ Positive' : spot.avgTone < -2 ? '▼ Negative' : '● Neutral';
+    const toneColor = spot.avgTone > 2 ? '#22d3ee' : spot.avgTone < -2 ? '#ef4444' : '#8896b0';
+
+    const popup = `
+      <div class="popup-header">
+        <div>
+          <div class="popup-city">${spot.city}</div>
+          <div class="popup-country">${spot.country}</div>
+        </div>
+        <span class="popup-badge" style="background:${badgeColor};margin-left:auto;">
+          ${spot.categories[0]}
+        </span>
+      </div>
+      <div class="popup-stats">
+        <div class="popup-stat">
+          <div class="popup-stat-value">${spot.numSources}</div>
+          <div class="popup-stat-label">Sources</div>
+        </div>
+        <div class="popup-stat">
+          <div class="popup-stat-value">${spot.intensity}</div>
+          <div class="popup-stat-label">Intensity</div>
+        </div>
+        <div class="popup-stat">
+          <div class="popup-stat-value" style="color:${toneColor}">${toneLabel}</div>
+          <div class="popup-stat-label">Tone</div>
+        </div>
+      </div>
+      <ul class="popup-articles">${articlesList}</ul>
+    `;
+
+    coreMarker.bindPopup(popup, { maxWidth: 340, className: '' });
+    markersLayer.addLayer(coreMarker);
+  });
+}
+
+// ══════════════════════════════════════════════════
+// DATA LOADING
+// ══════════════════════════════════════════════════
+async function loadData() {
+  if (CONFIG.dataURL) {
+    try {
+      const res = await fetch(CONFIG.dataURL + '?t=' + Date.now());
+      const data = await res.json();
+      // Apply minimum sources filter
+      hotspotData = data.filter(d => d.numSources >= CONFIG.minSources);
+    } catch (err) {
+      console.error('Failed to fetch live data, using demo:', err);
+      hotspotData = DEMO_DATA;
+    }
+  } else {
+    hotspotData = DEMO_DATA;
+  }
+
+  renderMarkers(hotspotData, currentCategory);
+  document.getElementById('update-time').textContent =
+    'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// ══════════════════════════════════════════════════
+// CATEGORY BUTTONS
+// ══════════════════════════════════════════════════
+document.querySelectorAll('.cat-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentCategory = btn.dataset.cat;
+    renderMarkers(hotspotData, currentCategory);
+  });
+});
+
+// ══════════════════════════════════════════════════
+// BOOT
+// ══════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', async () => {
+  initMap();
+  await loadData();
+
+  // Hide loader
+  setTimeout(() => {
+    document.getElementById('loading-overlay').classList.add('hidden');
+  }, 800);
+
+  // Auto-refresh if live
+  if (CONFIG.dataURL) {
+    setInterval(loadData, CONFIG.refreshInterval);
+  }
+});
+</script>
+</body>
+</html>
