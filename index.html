@@ -264,6 +264,62 @@
     color: var(--text-secondary);
   }
 
+  /* ── View Toggle ── */
+  .view-toggle {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+    margin-left: 6px;
+  }
+  .view-toggle:hover {
+    background: rgba(59,130,246,0.15) !important;
+  }
+
+  /* ── Heatmap Popup (bulleted story list) ── */
+  .popup-story-list {
+    list-style: none;
+    max-height: 280px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .popup-story-list li {
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(30,45,69,0.4);
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+
+  .popup-story-list li:last-child { border-bottom: none; }
+
+  .popup-story-list .story-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .popup-story-list .story-text {
+    color: var(--text-secondary);
+  }
+
+  .popup-story-list .story-sources {
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .popup-story-list a {
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 10px;
+  }
+  .popup-story-list a:hover { color: var(--accent); }
+
   /* ── Legend ── */
   #legend {
     position: fixed;
@@ -447,6 +503,7 @@
       <button class="cat-btn" data-cat="humanitarian">Humanitarian</button>
       <button class="cat-btn" data-cat="health">Health</button>
       <button class="cat-btn" data-cat="positive">Positive</button>
+      <button class="cat-btn view-toggle" id="view-toggle" title="Switch view mode">⬡ DOTS</button>
     </div>
   </div>
 </div>
@@ -490,13 +547,14 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 <script>
 // ══════════════════════════════════════════════════
 // CONFIG
 // ══════════════════════════════════════════════════
 const CONFIG = {
   // Set to a URL to fetch live data; null uses demo data
-  dataURL: './data/live.json', // e.g. './data/live.json'
+  dataURL: './data/live.json',
   refreshInterval: 15 * 60 * 1000, // 15 minutes
   minSources: 2, // minimum NumSources threshold for GDELT filtering
 };
@@ -655,7 +713,9 @@ const DEMO_DATA = [
 // ══════════════════════════════════════════════════
 let map;
 let markersLayer;
+let heatmapLayer;
 let currentCategory = 'all';
+let viewMode = 'dots'; // 'dots' or 'heatmap'
 let hotspotData = [];
 
 // ══════════════════════════════════════════════════
@@ -812,6 +872,134 @@ function renderMarkers(data, filter) {
 }
 
 // ══════════════════════════════════════════════════
+// HEATMAP RENDERING (Weather Forecast Mode)
+// ══════════════════════════════════════════════════
+function renderHeatmap(data, filter) {
+  markersLayer.clearLayers();
+  if (heatmapLayer) {
+    map.removeLayer(heatmapLayer);
+    heatmapLayer = null;
+  }
+
+  const filtered = filter === 'all'
+    ? data
+    : data.filter(d => d.categories.includes(filter));
+
+  // Update stats
+  const countries = new Set(filtered.map(d => d.country));
+  const totalSources = filtered.reduce((s, d) => s + d.numSources, 0);
+  document.getElementById('stat-hotspots').textContent = filtered.length.toLocaleString();
+  document.getElementById('stat-sources').textContent = totalSources.toLocaleString();
+  document.getElementById('stat-countries').textContent = countries.size;
+
+  // Build heatmap data: [lat, lng, intensity]
+  const heatData = filtered.map(spot => [
+    spot.lat, spot.lng, Math.max(spot.intensity / 100, 0.1)
+  ]);
+
+  // Create heatmap layer with weather-radar-style gradient
+  heatmapLayer = L.heatLayer(heatData, {
+    radius: 25,
+    blur: 20,
+    maxZoom: 10,
+    max: 1.0,
+    minOpacity: 0.3,
+    gradient: {
+      0.0: '#0a0e17',   // Dark base (barely visible)
+      0.15: '#1a237e',  // Deep navy
+      0.3: '#1565c0',   // Dark blue
+      0.45: '#2196f3',  // Blue
+      0.55: '#4caf50',  // Green
+      0.65: '#ffeb3b',  // Yellow
+      0.75: '#ff9800',  // Orange
+      0.85: '#f44336',  // Red
+      0.95: '#d50000',  // Deep red
+      1.0: '#ff1744',   // Bright red (hottest)
+    }
+  }).addTo(map);
+
+  // Add invisible click markers so users can click regions
+  // Group events by rounded location for click targets
+  const clickGroups = {};
+  filtered.forEach(spot => {
+    const key = `${Math.round(spot.lat)},${Math.round(spot.lng)}`;
+    if (!clickGroups[key]) {
+      clickGroups[key] = { lat: 0, lng: 0, stories: [], count: 0 };
+    }
+    const g = clickGroups[key];
+    g.lat += spot.lat;
+    g.lng += spot.lng;
+    g.count++;
+    if (g.stories.length < 20) { // Cap stories per click region
+      g.stories.push(spot);
+    }
+  });
+
+  Object.values(clickGroups).forEach(g => {
+    const lat = g.lat / g.count;
+    const lng = g.lng / g.count;
+
+    const clickMarker = L.circleMarker([lat, lng], {
+      radius: 18,
+      fillColor: 'transparent',
+      fillOpacity: 0,
+      stroke: false,
+      interactive: true,
+    });
+
+    // Build bulleted story list popup
+    const city = g.stories[0]?.city || 'Unknown';
+    const country = g.stories[0]?.country || '';
+
+    // Sort stories by intensity
+    g.stories.sort((a, b) => b.intensity - a.intensity);
+
+    const storyItems = g.stories.map(s => {
+      const badgeColor = CAT_COLORS[s.categories[0]]?.base || DEFAULT_COLOR.base;
+      const catLabel = s.categories[0] || 'news';
+      const sourceUrl = (s.articles && s.articles[0]) ? s.articles[0].url : (s.sourceUrls?.[0] || '#');
+      return `
+        <li>
+          <span class="story-badge" style="background:${badgeColor}">${catLabel}</span>
+          <span class="story-text">${s.summary || s.city + ': event'}</span>
+          <span class="story-sources">(${s.numSources} src)</span>
+          ${sourceUrl !== '#' ? `<a href="${sourceUrl}" target="_blank"> ↗</a>` : ''}
+        </li>`;
+    }).join('');
+
+    const popup = `
+      <div class="popup-header">
+        <div>
+          <div class="popup-city">${city}</div>
+          <div class="popup-country">${country} — ${g.count} events in this area</div>
+        </div>
+      </div>
+      <ul class="popup-story-list">${storyItems}</ul>
+    `;
+
+    clickMarker.bindPopup(popup, { maxWidth: 380, maxHeight: 350 });
+    markersLayer.addLayer(clickMarker);
+  });
+}
+
+// ══════════════════════════════════════════════════
+// RENDER DISPATCH
+// ══════════════════════════════════════════════════
+function render() {
+  // Clean up heatmap if switching away
+  if (viewMode !== 'heatmap' && heatmapLayer) {
+    map.removeLayer(heatmapLayer);
+    heatmapLayer = null;
+  }
+
+  if (viewMode === 'heatmap') {
+    renderHeatmap(hotspotData, currentCategory);
+  } else {
+    renderMarkers(hotspotData, currentCategory);
+  }
+}
+
+// ══════════════════════════════════════════════════
 // DATA LOADING
 // ══════════════════════════════════════════════════
 async function loadData() {
@@ -831,7 +1019,7 @@ async function loadData() {
     hotspotData = DEMO_DATA;
   }
 
-  renderMarkers(hotspotData, currentCategory);
+  render();
   document.getElementById('update-time').textContent =
     'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -839,13 +1027,34 @@ async function loadData() {
 // ══════════════════════════════════════════════════
 // CATEGORY BUTTONS
 // ══════════════════════════════════════════════════
-document.querySelectorAll('.cat-btn').forEach(btn => {
+document.querySelectorAll('.cat-btn:not(.view-toggle)').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.cat-btn:not(.view-toggle)').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentCategory = btn.dataset.cat;
-    renderMarkers(hotspotData, currentCategory);
+    render();
   });
+});
+
+// ══════════════════════════════════════════════════
+// VIEW MODE TOGGLE
+// ══════════════════════════════════════════════════
+document.getElementById('view-toggle').addEventListener('click', () => {
+  const btn = document.getElementById('view-toggle');
+  if (viewMode === 'dots') {
+    viewMode = 'heatmap';
+    btn.textContent = '◉ HEAT';
+    btn.style.background = 'rgba(239,68,68,0.2)';
+    btn.style.borderColor = '#ef4444';
+    btn.style.color = '#ef4444';
+  } else {
+    viewMode = 'dots';
+    btn.textContent = '⬡ DOTS';
+    btn.style.background = '';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }
+  render();
 });
 
 // ══════════════════════════════════════════════════
