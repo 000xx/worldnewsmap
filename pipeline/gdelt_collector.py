@@ -22,9 +22,9 @@ CAMEO_CATEGORY_MAP = {
     "03": "politics",       # Express intent to cooperate
     "04": "politics",       # Consult
     "05": "politics",       # Engage in diplomatic cooperation
-    "06": "positive",       # Engage in material cooperation
+    "06": "politics",       # Engage in material cooperation
     "07": "economy",        # Provide aid
-    "08": "positive",       # Yield / Concede
+    "08": "politics",       # Yield / Concede
     # Verbal Conflict
     "09": "politics",       # Investigate
     "10": "politics",       # Demand
@@ -78,9 +78,18 @@ def classify_event(event_code, goldstein, avg_tone):
         cat = CAMEO_CATEGORY_MAP.get(root, "politics")
         categories.append(cat)
 
-    # Add secondary categories based on tone / goldstein
-    if avg_tone > 3.0 and goldstein > 3.0 and "positive" not in categories:
-        categories.append("positive")
+    # POSITIVE: Only if the actual article tone is genuinely positive.
+    # AvgTone > 5 is truly upbeat coverage (not just "not negative").
+    # Also require goldstein > 0 to avoid positive-toned articles about bad events.
+    if avg_tone > 5.0 and goldstein > 0:
+        # Replace primary category with positive if tone is very high
+        categories = ["positive"] + [c for c in categories if c != "positive"]
+    elif avg_tone > 3.0 and goldstein > 3.0:
+        # Add as secondary if moderately positive
+        if "positive" not in categories:
+            categories.append("positive")
+
+    # CONFLICT: escalate if goldstein is very negative
     if goldstein < -7.0 and "conflict" not in categories:
         categories.append("conflict")
 
@@ -250,6 +259,73 @@ def safe_int(val, default=0):
         return default
 
 
+# ── Location Correction ─────────────────────────────────────────
+# GDELT often geocodes to country centroids when it can't find a city.
+# These coordinates land in the middle of nowhere (center of Russia,
+# center of China, etc). We detect and flag these.
+
+# Known country centroid coordinates (lat, lng) rounded to 1 decimal.
+# If an event's coordinates match one of these, it was geocoded to the
+# country level, not a specific city.
+COUNTRY_CENTROIDS = {
+    (60.0, 100.0): "Russia",
+    (35.0, 105.0): "China",
+    (20.0, 77.0): "India",
+    (64.0, 26.0): "Finland",
+    (-25.0, 135.0): "Australia",
+    (56.0, -106.0): "Canada",
+    (39.0, -98.0): "United States",
+    (-10.0, -55.0): "Brazil",
+    (-35.0, -65.0): "Argentina",
+    (47.0, 2.0): "France",
+    (51.0, 9.0): "Germany",
+    (46.0, 25.0): "Romania",
+    (52.0, 20.0): "Poland",
+    (49.0, 32.0): "Ukraine",
+    (23.0, 45.0): "Saudi Arabia",
+    (32.0, 54.0): "Iran",
+    (34.0, 44.0): "Iraq",
+    (15.0, 30.0): "Sudan",
+    (10.0, 8.0): "Nigeria",
+    (1.0, 38.0): "Kenya",
+    (-2.0, 30.0): "DR Congo",
+    (15.0, 102.0): "Thailand",
+    (-5.0, 120.0): "Indonesia",
+    (13.0, 122.0): "Philippines",
+    (36.0, 128.0): "South Korea",
+    (36.0, 138.0): "Japan",
+    (48.0, 68.0): "Kazakhstan",
+    (41.0, 64.0): "Uzbekistan",
+    (29.0, 84.0): "Nepal",
+    (7.0, 81.0): "Sri Lanka",
+    (22.0, 98.0): "Myanmar",
+    (24.0, 90.0): "Bangladesh",
+    (28.0, 3.0): "Algeria",
+    (34.0, 9.0): "Tunisia",
+    (32.0, 17.0): "Libya",
+    (27.0, 30.0): "Egypt",
+    (9.0, 42.0): "Ethiopia",
+    (-6.0, 35.0): "Tanzania",
+    (-13.0, 34.0): "Malawi",
+    (-22.0, 24.0): "Botswana",
+    (-29.0, 24.0): "South Africa",
+    (42.0, 44.0): "Georgia",
+    (40.0, 50.0): "Azerbaijan",
+    (40.0, 45.0): "Armenia",
+    (12.0, 15.0): "Chad",
+    (17.0, -4.0): "Mali",
+    (14.0, -14.0): "Senegal",
+    (8.0, -2.0): "Ghana",
+    (6.0, -5.0): "Ivory Coast",
+}
+
+
+def is_country_centroid(lat, lng):
+    """Check if coordinates match a known country centroid (imprecise geocoding)."""
+    rounded = (round(lat), round(lng))
+    return rounded in COUNTRY_CENTROIDS
+
+
 # ── Fetching Daily Export Files ─────────────────────────────────
 
 def get_daily_export_urls(num_days=5):
@@ -410,6 +486,11 @@ def parse_events(file_data, min_sources=5):
                 filtered_geo += 1
                 continue
 
+            # Skip country centroids (imprecise geocoding to middle of nowhere)
+            if is_country_centroid(lat, lng):
+                filtered_geo += 1
+                continue
+
             event_code = row[COL["EventCode"]].strip()
             goldstein = safe_float(row[COL["GoldsteinScale"]])
             avg_tone = safe_float(row[COL["AvgTone"]])
@@ -460,27 +541,177 @@ def parse_events(file_data, min_sources=5):
 
 # ── Summary Generation ──────────────────────────────────────────
 
-CAMEO_DESCRIPTIONS = {
-    "01": "public statement",
-    "02": "appeal",
-    "03": "cooperation intent",
-    "04": "diplomatic consultation",
-    "05": "diplomatic cooperation",
-    "06": "material cooperation",
-    "07": "aid provision",
-    "08": "concession",
-    "09": "investigation",
-    "10": "demand",
-    "11": "disapproval",
-    "12": "rejection",
-    "13": "threat",
-    "14": "protest",
-    "15": "military posturing",
+# More specific CAMEO descriptions at the base code level (2-3 digits)
+CAMEO_DETAIL = {
+    # Verbal Cooperation
+    "010": "made a public statement",
+    "011": "declined to comment",
+    "012": "made a pessimistic comment",
+    "013": "made an optimistic comment",
+    "014": "considered a policy option",
+    "015": "acknowledged responsibility",
+    "016": "denied responsibility",
+    "017": "engaged in diplomatic talks",
+    "018": "made a call or visit",
+    "019": "expressed confidence",
+    "020": "made an appeal",
+    "021": "appealed for material cooperation",
+    "023": "appealed for aid",
+    "024": "appealed for political reform",
+    "025": "appealed for policy change",
+    "026": "appealed to others to meet or negotiate",
+    "027": "appealed to others to settle a dispute",
+    "028": "appealed for de-escalation",
+    "030": "expressed intent to cooperate",
+    "031": "expressed intent to engage diplomatically",
+    "033": "expressed intent to provide aid",
+    "034": "expressed intent to institute political reform",
+    "035": "expressed intent to yield territory or authority",
+    "036": "expressed intent to meet or negotiate",
+    "040": "held a consultation",
+    "041": "discussed governance issues",
+    "042": "made a diplomatic visit",
+    "043": "hosted a diplomatic meeting",
+    "044": "mediated in a dispute",
+    "045": "provided diplomatic recognition",
+    "046": "held bilateral or multilateral talks",
+    "050": "engaged in diplomatic cooperation",
+    "051": "praised or endorsed",
+    "052": "defended policies or actions",
+    "053": "rallied political support",
+    "054": "signed a formal agreement",
+    "055": "provided diplomatic support",
+    "056": "formed an alliance or partnership",
+    "057": "established diplomatic relations",
+    "060": "engaged in material cooperation",
+    "061": "provided economic cooperation or support",
+    "062": "provided military cooperation or support",
+    "063": "provided humanitarian cooperation or support",
+    "064": "provided judicial cooperation",
+    "070": "provided aid",
+    "071": "provided economic aid",
+    "072": "provided military aid",
+    "073": "provided humanitarian aid",
+    "074": "provided development aid",
+    "075": "granted asylum or refugee status",
+    "080": "made a concession or yielded",
+    "081": "eased political restrictions",
+    "082": "eased economic or military restrictions",
+    "083": "allowed international involvement",
+    "084": "eased sanctions or embargoes",
+    "086": "returned territory or persons",
+    "087": "yielded in a negotiation",
+    # Verbal Conflict
+    "090": "launched an investigation",
+    "091": "investigated alleged crimes or corruption",
+    "092": "investigated human rights violations",
+    "093": "investigated military actions",
+    "094": "investigated war crimes",
+    "100": "made demands",
+    "101": "demanded political reform",
+    "102": "demanded policy change",
+    "103": "demanded rights or territory",
+    "104": "demanded economic reform",
+    "105": "demanded that sanctions be lifted",
+    "106": "demanded a meeting or negotiation",
+    "107": "demanded the release of persons or property",
+    "108": "demanded disarmament",
+    "110": "expressed disapproval",
+    "111": "criticized publicly",
+    "112": "accused of wrongdoing",
+    "113": "filed a formal complaint",
+    "114": "issued a warning",
+    "115": "brought a lawsuit",
+    "116": "found guilty in a legal ruling",
+    "120": "rejected or refused",
+    "121": "rejected a proposal or plan",
+    "122": "refused to cooperate",
+    "123": "rejected a request for aid",
+    "124": "refused to allow access",
+    "125": "rejected a peace plan",
+    "126": "defied international norms",
+    "127": "vetoed a resolution",
+    "128": "rejected ceasefire terms",
+    "129": "walked out of talks",
+    "130": "issued a threat",
+    "131": "threatened with non-force actions",
+    "132": "threatened with economic sanctions",
+    "133": "threatened to cut off relations",
+    "134": "threatened to boycott",
+    "135": "threatened with military action",
+    "136": "threatened to use weapons of mass destruction",
+    "137": "threatened to attack",
+    "138": "threatened to use nuclear weapons",
+    "139": "issued an ultimatum",
+    "140": "held a protest or demonstration",
+    "141": "demonstrated or rallied",
+    "142": "conducted a hunger strike",
+    "143": "conducted a strike or boycott",
+    "144": "obstructed passage or blocked movement",
+    "145": "staged a political protest",
+    # Material Conflict
+    "150": "demonstrated military strength",
+    "151": "increased military alert level",
+    "152": "mobilized armed forces",
+    "153": "placed troops on alert",
+    "154": "conducted a military exercise",
+    "155": "mobilized police forces",
+    "160": "reduced or severed relations",
+    "161": "reduced diplomatic relations",
+    "162": "reduced or suspended aid",
+    "163": "expelled or withdrew diplomatic personnel",
+    "164": "cut off diplomatic communications",
+    "165": "severed diplomatic relations",
+    "166": "expelled from an international organization",
+    "170": "engaged in coercion",
+    "171": "seized or detained persons",
+    "172": "imposed administrative sanctions",
+    "173": "arrested or detained suspects",
+    "174": "expelled or deported individuals",
+    "175": "imposed economic sanctions",
+    "176": "imposed a blockade or embargo",
+    "180": "carried out an assault",
+    "181": "used chemical, biological, or radiological weapons",
+    "182": "carried out a suicide bombing",
+    "183": "used improvised explosive device",
+    "184": "engaged in a violent clash",
+    "185": "attempted assassination",
+    "186": "committed an assassination",
+    "190": "used conventional military force",
+    "191": "imposed a no-fly zone",
+    "192": "imposed a blockade",
+    "193": "conducted an air or missile strike",
+    "194": "seized or occupied territory",
+    "195": "used unconventional violence",
+    "196": "carried out a bombing",
+    "200": "used unconventional mass violence",
+    "201": "engaged in mass expulsion",
+    "202": "engaged in ethnic cleansing",
+    "203": "engaged in mass killings",
+}
+
+# Fallback root-level descriptions
+CAMEO_ROOT = {
+    "01": "made a public statement",
+    "02": "issued an appeal",
+    "03": "expressed intent to cooperate",
+    "04": "held consultations",
+    "05": "engaged in diplomatic cooperation",
+    "06": "provided material cooperation",
+    "07": "provided aid",
+    "08": "made concessions",
+    "09": "launched an investigation",
+    "10": "made demands",
+    "11": "expressed disapproval",
+    "12": "rejected proposals",
+    "13": "issued threats",
+    "14": "held protests",
+    "15": "demonstrated military strength",
     "16": "reduced relations",
-    "17": "coercion",
-    "18": "assault",
-    "19": "military force",
-    "20": "mass violence",
+    "17": "engaged in coercion",
+    "18": "carried out an assault",
+    "19": "used military force",
+    "20": "engaged in mass violence",
 }
 
 CATEGORY_LABELS = {
@@ -494,36 +725,73 @@ CATEGORY_LABELS = {
 }
 
 
+def clean_actor_name(name):
+    """Clean up GDELT actor names for display."""
+    if not name:
+        return ""
+    # Title case, but preserve known acronyms
+    name = name.strip()
+    # Common patterns
+    if name.isupper() and len(name) <= 5:
+        return name  # Likely an acronym like NATO, EU, IMF
+    return name.title()
+
+
 def generate_event_summary(ev):
-    """Generate a short human-readable summary for a single event."""
-    root = ev["event_code"][:2]
-    action = CAMEO_DESCRIPTIONS.get(root, "event")
-    cat_label = CATEGORY_LABELS.get(ev["categories"][0], "News")
+    """
+    Generate a natural human-readable summary for a single event.
+    Reads like a brief news headline or subheading.
+    """
+    # Get the most specific action description available
+    event_code = ev["event_code"].strip()
+    action = None
 
-    parts = [cat_label]
+    # Try 3-digit base code first, then 2-digit root
+    if len(event_code) >= 3:
+        action = CAMEO_DETAIL.get(event_code[:3])
+    if not action and len(event_code) >= 2:
+        action = CAMEO_ROOT.get(event_code[:2])
+    if not action:
+        action = "was involved in a notable event"
 
-    # Add action type
-    parts.append(f"— {action}")
+    # Build actor string
+    a1 = clean_actor_name(ev["actor1_name"])
+    a2 = clean_actor_name(ev["actor2_name"])
 
-    # Add actors if available
-    actors = []
-    if ev["actor1_name"]:
-        actors.append(ev["actor1_name"].title())
-    if ev["actor2_name"]:
-        actors.append(ev["actor2_name"].title())
-    if actors:
-        parts.append(f"involving {' and '.join(actors[:2])}")
+    # Construct the summary as a readable sentence
+    if a1 and a2:
+        summary = f"{a1} {action} regarding {a2}"
+    elif a1:
+        summary = f"{a1} {action}"
+    elif a2:
+        summary = f"Actions directed at {a2}: {action}"
+    else:
+        # No actors — use location as subject
+        summary = f"{ev['city']}: {action}"
 
-    # Add tone context
+    # Add source count for credibility context
+    sources = ev["num_sources"]
+    if sources >= 50:
+        summary += f" — major global coverage ({sources} sources)"
+    elif sources >= 20:
+        summary += f" — widespread coverage ({sources} sources)"
+    elif sources >= 10:
+        summary += f" — significant coverage ({sources} sources)"
+    else:
+        summary += f" — {sources} sources"
+
+    # Add tone indicator
     tone = ev["avg_tone"]
-    if tone < -5:
-        parts.append("(intense coverage)")
-    elif tone < -2:
-        parts.append("(negative coverage)")
-    elif tone > 3:
-        parts.append("(positive coverage)")
+    if tone < -7:
+        summary += ", extremely negative tone"
+    elif tone < -4:
+        summary += ", strongly negative tone"
+    elif tone > 5:
+        summary += ", strongly positive tone"
+    elif tone > 2:
+        summary += ", positive tone"
 
-    return " ".join(parts)
+    return summary
 
 
 # ── Format Events as Hotspots ───────────────────────────────────
