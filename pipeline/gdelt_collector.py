@@ -794,6 +794,120 @@ def generate_event_summary(ev):
     return summary
 
 
+# ── Search Query Builder (for DOC API enrichment) ───────────────
+
+# CAMEO code to search keyword mapping
+CAMEO_SEARCH_KEYWORDS = {
+    "01": "", "02": "appeal", "03": "cooperation", "04": "talks",
+    "05": "diplomacy", "06": "cooperation", "07": "aid",
+    "08": "agreement", "09": "investigation", "10": "demand",
+    "11": "criticism", "12": "rejection", "13": "threat",
+    "14": "protest", "15": "military", "16": "sanctions",
+    "17": "sanctions", "18": "attack", "19": "military strike",
+    "20": "violence",
+}
+
+# Skip these generic actor names in search queries
+GENERIC_ACTORS = {
+    "", "UNITED STATES", "CHINA", "RUSSIA", "GOVERNMENT", "PRESIDENT",
+    "POLICE", "MILITARY", "CITIZEN", "MEDIA", "AUTHORITIES",
+}
+
+
+def build_search_query(ev):
+    """Build a DOC API search query from an event's metadata."""
+    parts = []
+
+    # Always include city
+    if ev["city"] and len(ev["city"]) > 2:
+        parts.append(ev["city"])
+
+    # Add meaningful actors
+    for name in [ev["actor1_name"], ev["actor2_name"]]:
+        cleaned = name.strip().upper()
+        if cleaned and cleaned not in GENERIC_ACTORS and len(cleaned) > 2:
+            parts.append(name.strip().title())
+            if len(parts) >= 3:
+                break
+
+    # Add event-type keyword
+    root = ev["event_code"][:2]
+    kw = CAMEO_SEARCH_KEYWORDS.get(root, "")
+    if kw and len(parts) < 4:
+        parts.append(kw)
+
+    # Cap at 5 words, join
+    query = " ".join(parts[:5])
+    return query if len(query) > 3 else f"{ev['city']} {ev['country']} news"
+
+
+# ── Country to Continent Mapping ────────────────────────────────
+
+COUNTRY_TO_CONTINENT = {
+    # Africa
+    "Algeria": "Africa", "Angola": "Africa", "Benin": "Africa", "Botswana": "Africa",
+    "Burkina Faso": "Africa", "Burundi": "Africa", "Cameroon": "Africa", "Cape Verde": "Africa",
+    "Central African Republic": "Africa", "Chad": "Africa", "Comoros": "Africa",
+    "Democratic Republic of the Congo": "Africa", "DR Congo": "Africa", "Congo": "Africa",
+    "Djibouti": "Africa", "Egypt": "Africa", "Equatorial Guinea": "Africa", "Eritrea": "Africa",
+    "Eswatini": "Africa", "Ethiopia": "Africa", "Gabon": "Africa", "Gambia": "Africa",
+    "Ghana": "Africa", "Guinea": "Africa", "Guinea-Bissau": "Africa", "Ivory Coast": "Africa",
+    "Kenya": "Africa", "Lesotho": "Africa", "Liberia": "Africa", "Libya": "Africa",
+    "Madagascar": "Africa", "Malawi": "Africa", "Mali": "Africa", "Mauritania": "Africa",
+    "Mauritius": "Africa", "Morocco": "Africa", "Mozambique": "Africa", "Namibia": "Africa",
+    "Niger": "Africa", "Nigeria": "Africa", "Rwanda": "Africa", "Senegal": "Africa",
+    "Sierra Leone": "Africa", "Somalia": "Africa", "South Africa": "Africa",
+    "South Sudan": "Africa", "Sudan": "Africa", "Tanzania": "Africa", "Togo": "Africa",
+    "Tunisia": "Africa", "Uganda": "Africa", "Zambia": "Africa", "Zimbabwe": "Africa",
+    # Asia
+    "Afghanistan": "Asia", "Armenia": "Asia", "Azerbaijan": "Asia", "Bahrain": "Asia",
+    "Bangladesh": "Asia", "Bhutan": "Asia", "Brunei": "Asia", "Cambodia": "Asia",
+    "China": "Asia", "Cyprus": "Asia", "Georgia": "Asia", "India": "Asia",
+    "Indonesia": "Asia", "Iran": "Asia", "Iraq": "Asia", "Israel": "Asia",
+    "Japan": "Asia", "Jordan": "Asia", "Kazakhstan": "Asia", "Kuwait": "Asia",
+    "Kyrgyzstan": "Asia", "Laos": "Asia", "Lebanon": "Asia", "Malaysia": "Asia",
+    "Maldives": "Asia", "Mongolia": "Asia", "Myanmar": "Asia", "Nepal": "Asia",
+    "North Korea": "Asia", "Oman": "Asia", "Pakistan": "Asia", "Palestine": "Asia",
+    "Philippines": "Asia", "Qatar": "Asia", "Saudi Arabia": "Asia", "Singapore": "Asia",
+    "South Korea": "Asia", "Sri Lanka": "Asia", "Syria": "Asia", "Taiwan": "Asia",
+    "Tajikistan": "Asia", "Thailand": "Asia", "Timor-Leste": "Asia", "Turkey": "Asia",
+    "Turkmenistan": "Asia", "United Arab Emirates": "Asia", "Uzbekistan": "Asia",
+    "Vietnam": "Asia", "Yemen": "Asia",
+    # Europe
+    "Albania": "Europe", "Andorra": "Europe", "Austria": "Europe", "Belarus": "Europe",
+    "Belgium": "Europe", "Bosnia and Herzegovina": "Europe", "Bulgaria": "Europe",
+    "Croatia": "Europe", "Czech Republic": "Europe", "Denmark": "Europe", "Estonia": "Europe",
+    "Finland": "Europe", "France": "Europe", "Germany": "Europe", "Greece": "Europe",
+    "Hungary": "Europe", "Iceland": "Europe", "Ireland": "Europe", "Italy": "Europe",
+    "Kosovo": "Europe", "Latvia": "Europe", "Lithuania": "Europe", "Luxembourg": "Europe",
+    "Malta": "Europe", "Moldova": "Europe", "Monaco": "Europe", "Montenegro": "Europe",
+    "Netherlands": "Europe", "North Macedonia": "Europe", "Norway": "Europe", "Poland": "Europe",
+    "Portugal": "Europe", "Romania": "Europe", "Russia": "Europe", "Serbia": "Europe",
+    "Slovakia": "Europe", "Slovenia": "Europe", "Spain": "Europe", "Sweden": "Europe",
+    "Switzerland": "Europe", "Ukraine": "Europe", "United Kingdom": "Europe",
+    # North America
+    "Canada": "North America", "Costa Rica": "North America", "Cuba": "North America",
+    "Dominican Republic": "North America", "El Salvador": "North America",
+    "Guatemala": "North America", "Haiti": "North America", "Honduras": "North America",
+    "Jamaica": "North America", "Mexico": "North America", "Nicaragua": "North America",
+    "Panama": "North America", "Trinidad and Tobago": "North America",
+    "United States": "North America",
+    # South America
+    "Argentina": "South America", "Bolivia": "South America", "Brazil": "South America",
+    "Chile": "South America", "Colombia": "South America", "Ecuador": "South America",
+    "Guyana": "South America", "Paraguay": "South America", "Peru": "South America",
+    "Suriname": "South America", "Uruguay": "South America", "Venezuela": "South America",
+    # Oceania
+    "Australia": "Oceania", "Fiji": "Oceania", "New Zealand": "Oceania",
+    "Papua New Guinea": "Oceania",
+}
+
+
+def get_continent(country):
+    """Look up continent for a country name. Returns 'Other' if unknown."""
+    return COUNTRY_TO_CONTINENT.get(country, "Other")
+
+
 # ── Format Events as Hotspots ───────────────────────────────────
 
 def events_to_hotspots(events, max_hotspots=None):
@@ -814,12 +928,15 @@ def events_to_hotspots(events, max_hotspots=None):
         )
 
         summary = generate_event_summary(ev)
+        search_query = build_search_query(ev)
+        continent = get_continent(ev["country"])
 
         hotspots.append({
             "lat": ev["lat"],
             "lng": ev["lng"],
             "city": ev["city"],
             "country": ev["country"],
+            "continent": continent,
             "categories": ev["categories"],
             "intensity_raw": raw_intensity,
             "numSources": ev["num_sources"],
@@ -830,6 +947,7 @@ def events_to_hotspots(events, max_hotspots=None):
             "eventCount": 1,
             "hoursAgo": None,
             "summary": summary,
+            "searchQuery": search_query,
             "sourceUrls": [ev["source_url"]] if ev["source_url"] else [],
         })
 
@@ -852,10 +970,10 @@ def events_to_hotspots(events, max_hotspots=None):
 
 # ── Main Entry Point ────────────────────────────────────────────
 
-def collect(min_sources=5, max_age_hours=36, num_days=3):
+def collect(min_sources=3, max_age_hours=36, num_days=3):
     """
     Main collection pipeline. Returns list of hotspot dicts.
-    Each GDELT event with 5+ sources becomes its own hotspot.
+    Each GDELT event with 3+ sources becomes its own hotspot.
     """
     print("[GDELT Collector]")
     print(f"  Strategy: every event with {min_sources}+ sources from last {num_days} available daily files")
@@ -868,8 +986,8 @@ def collect(min_sources=5, max_age_hours=36, num_days=3):
     print()
     events = parse_events(file_data, min_sources=min_sources)
     if not events:
-        print(f"\n  No events at {min_sources}+ sources. Retrying with min_sources=2...")
-        events = parse_events(file_data, min_sources=2)
+        print(f"\n  No events at {min_sources}+ sources. Retrying with min_sources=1...")
+        events = parse_events(file_data, min_sources=1)
         if not events:
             return []
 
@@ -879,10 +997,11 @@ def collect(min_sources=5, max_age_hours=36, num_days=3):
 
 
 if __name__ == "__main__":
-    hotspots = collect(min_sources=5, max_age_hours=36)
+    hotspots = collect(min_sources=3, max_age_hours=36)
     print(f"\nTotal: {len(hotspots):,} events")
     print(f"\nTop 15:")
     for h in hotspots[:15]:
-        print(f"  {h['city']}, {h['country']} — intensity: {h['intensity']}, "
+        print(f"  {h['city']}, {h['country']} ({h['continent']}) — intensity: {h['intensity']}, "
               f"sources: {h['numSources']}, cats: {h['categories']}")
         print(f"    {h['summary']}")
+        print(f"    Query: {h['searchQuery']}")
