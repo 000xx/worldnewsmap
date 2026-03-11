@@ -2,10 +2,8 @@
 Orchestrator — Phase 2
 Runs the complete pipeline:
   1. Collect events from GDELT daily exports (gdelt_collector)
-  2. Enrich hotspots with articles (article_enricher)
+  2. Enrich with real headlines via GDELT DOC 2.0 API (article_enricher)
   3. Write final JSON output for the frontend
-
-Configuration via environment variables or defaults.
 """
 
 import json
@@ -13,51 +11,29 @@ import os
 import sys
 from datetime import datetime, timezone
 
-# Add pipeline directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gdelt_collector import collect
 from article_enricher import enrich
 
 
-# ── Configuration ───────────────────────────────────────────────
 CONFIG = {
-    # Minimum number of unique sources for an event to be included.
-    # 5 is a good balance: filters noise but keeps global coverage.
-    "min_sources": int(os.environ.get("NEWSMAP_MIN_SOURCES", "5")),
-
-    # How far back to look for events (hours). 36h covers ~1.5 news cycles.
+    "min_sources": int(os.environ.get("NEWSMAP_MIN_SOURCES", "3")),
     "max_age_hours": int(os.environ.get("NEWSMAP_MAX_AGE_HOURS", "36")),
-
-    # Number of daily export files to fetch (3 days covers the 36h window fully).
     "num_days": int(os.environ.get("NEWSMAP_NUM_DAYS", "3")),
-
-    # Maximum hotspots to enrich with external articles (RSS/Guardian)
-    "max_enrich": int(os.environ.get("NEWSMAP_MAX_ENRICH", "50")),
-
-    # Guardian API key (free from https://open-platform.theguardian.com/)
-    "guardian_api_key": os.environ.get("GUARDIAN_API_KEY", None),
-
-    # Output file path
     "output_path": os.environ.get("NEWSMAP_OUTPUT", "data/live.json"),
-
-    # Maximum total hotspots in output (keeps file size manageable)
-    "max_hotspots": int(os.environ.get("NEWSMAP_MAX_HOTSPOTS", "200")),
-
-    # Delay between RSS requests (seconds)
-    "rss_delay": float(os.environ.get("NEWSMAP_RSS_DELAY", "1.0")),
+    "api_delay": float(os.environ.get("NEWSMAP_API_DELAY", "0.5")),
 }
 
 
 def run_pipeline():
-    """Execute the full data pipeline."""
     start_time = datetime.now(timezone.utc)
     print("=" * 60)
     print(f"World News Map Pipeline — {start_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print("=" * 60)
     print()
 
-    # ── Step 1: Collect from GDELT ──
+    # Step 1: Collect from GDELT
     hotspots = collect(
         min_sources=CONFIG["min_sources"],
         max_age_hours=CONFIG["max_age_hours"],
@@ -65,43 +41,30 @@ def run_pipeline():
     )
 
     if not hotspots:
-        print("\n✗ No hotspots collected. Check GDELT availability.")
-        print("  Writing empty dataset...")
+        print("\n✗ No hotspots collected.")
         write_output([], start_time)
         return
 
     print(f"\n  Total events: {len(hotspots):,}")
 
-    # ── Step 2: Enrich top hotspots with articles ──
-    # Only enrich top N with RSS/Guardian (too slow for all 60k)
+    # Step 2: Enrich with real headlines via DOC API
     print()
-    hotspots = enrich(
-        hotspots,
-        guardian_api_key=CONFIG["guardian_api_key"],
-        max_hotspots=CONFIG["max_enrich"],
-        delay=CONFIG["rss_delay"],
-    )
+    hotspots = enrich(hotspots, delay=CONFIG["api_delay"])
 
-    # ── Step 3: Clean and write output ──
+    # Step 3: Write output
     print()
     output = format_output(hotspots, start_time)
     write_output(output, start_time)
 
     elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
     print(f"\n{'=' * 60}")
-    print(f"Pipeline complete in {elapsed:.1f}s — {len(hotspots)} hotspots written")
+    print(f"Pipeline complete in {elapsed:.1f}s — {len(hotspots):,} events written")
     print(f"{'=' * 60}")
 
 
 def format_output(hotspots, timestamp):
-    """
-    Format hotspots into the final JSON structure expected by the frontend.
-    Each hotspot is one GDELT event.
-    """
     output = []
-
     for h in hotspots:
-        # Build articles list if present
         articles = []
         for a in h.get("articles", []):
             articles.append({
@@ -111,27 +74,27 @@ def format_output(hotspots, timestamp):
                 "lang": a.get("lang", "en"),
             })
 
-        # Source URLs as fallback article links
+        # Fallback: use GDELT source URL if no articles
         if not articles:
             for url in h.get("sourceUrls", [])[:1]:
                 try:
                     import urllib.parse
-                    domain = urllib.parse.urlparse(url).netloc
-                    domain = domain.replace("www.", "")
+                    domain = urllib.parse.urlparse(url).netloc.replace("www.", "")
                 except Exception:
                     domain = "Source"
                 articles.append({
-                    "title": f"Read full report",
+                    "title": "Read full report",
                     "url": url,
                     "source": domain,
                     "lang": "en",
                 })
 
-        entry = {
+        output.append({
             "lat": h["lat"],
             "lng": h["lng"],
             "city": h["city"],
             "country": h["country"],
+            "continent": h.get("continent", "Other"),
             "categories": h["categories"],
             "intensity": h["intensity"],
             "numSources": h["numSources"],
@@ -143,25 +106,18 @@ def format_output(hotspots, timestamp):
             "hoursAgo": h.get("hoursAgo"),
             "summary": h.get("summary", ""),
             "articles": articles,
-        }
-        output.append(entry)
-
+        })
     return output
 
 
 def write_output(data, timestamp):
-    """Write the final JSON file for the frontend to consume."""
     output_path = CONFIG["output_path"]
-
-    # Ensure directory exists
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
 
-    # Wrap in metadata envelope
     envelope = {
         "generated_at": timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "hotspot_count": len(data),
         "min_sources_threshold": CONFIG["min_sources"],
-        "max_age_hours": CONFIG["max_age_hours"],
         "hotspots": data,
     }
 
@@ -169,8 +125,9 @@ def write_output(data, timestamp):
         json.dump(envelope, f, ensure_ascii=False, separators=(",", ":"))
 
     size_kb = os.path.getsize(output_path) / 1024
+    size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
     print(f"[Output Writer]")
-    print(f"  ✓ Wrote {output_path} ({size_kb:.1f} KB, {len(data)} hotspots)")
+    print(f"  ✓ Wrote {output_path} ({size_str}, {len(data):,} events)")
 
 
 if __name__ == "__main__":
