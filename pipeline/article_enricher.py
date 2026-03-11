@@ -1,223 +1,237 @@
 """
 Article Enricher — Phase 2
-Takes GDELT hotspot clusters and enriches them with readable article
-headlines from Google News RSS and (optionally) The Guardian API.
+Uses GDELT DOC 2.0 API to fetch real article headlines for hotspots.
+Deduplicates by location+category so we make ~1000-1500 API calls
+instead of 60,000+, then distributes headlines to matching events.
 """
 
-import re
-import xml.etree.ElementTree as ET
+import json
 import urllib.request
 import urllib.parse
-import json
-from html import unescape
 from time import sleep
+from collections import defaultdict
 
 
-# ── Google News RSS ─────────────────────────────────────────────
-def fetch_google_news_rss(query, max_results=5):
+DOC_API_BASE = "https://api.gdeltproject.org/api/v2/doc/doc"
+
+
+def fetch_doc_api(query, max_records=5, timespan="3d"):
     """
-    Fetch articles from Google News RSS for a given query string.
-    Returns list of {title, url, source, published}.
+    Query GDELT DOC 2.0 API for articles matching a search query.
+    Returns list of {title, url, source, domain, language, seendate}.
+    Free, no API key needed.
     """
-    encoded = urllib.parse.quote(query)
-    url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
+    params = {
+        "query": query,
+        "mode": "ArtList",
+        "maxrecords": str(max_records),
+        "format": "json",
+        "timespan": timespan,
+        "sort": "HybridRel",  # Sort by relevance
+    }
+
+    url = f"{DOC_API_BASE}?{urllib.parse.urlencode(params)}"
 
     try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "WorldNewsMap/1.0",
-        })
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            xml_data = resp.read().decode("utf-8", errors="replace")
-
-        root = ET.fromstring(xml_data)
-        items = root.findall(".//item")
-
-        articles = []
-        for item in items[:max_results]:
-            title_el = item.find("title")
-            link_el = item.find("link")
-            pub_el = item.find("pubDate")
-            source_el = item.find("source")
-
-            title = unescape(title_el.text) if title_el is not None and title_el.text else ""
-            link = link_el.text if link_el is not None and link_el.text else ""
-            pub = pub_el.text if pub_el is not None and pub_el.text else ""
-            source = source_el.text if source_el is not None and source_el.text else ""
-
-            # Clean up title (Google News sometimes appends " - Source Name")
-            title_clean = re.sub(r'\s*-\s*[^-]+$', '', title) if ' - ' in title else title
-
-            if title_clean and link:
-                articles.append({
-                    "title": title_clean.strip(),
-                    "url": link.strip(),
-                    "source": source.strip() or "Google News",
-                    "published": pub.strip(),
-                    "lang": "en",
-                })
-
-        return articles
-    except Exception as e:
-        print(f"    ✗ RSS fetch failed for '{query}': {e}")
-        return []
-
-
-# ── The Guardian API ────────────────────────────────────────────
-def fetch_guardian_articles(query, api_key=None, max_results=3):
-    """
-    Fetch articles from The Guardian's Open Platform API.
-    Requires a free API key from https://open-platform.theguardian.com/
-    Pass api_key=None to skip this source.
-    """
-    if not api_key:
-        return []
-
-    try:
-        encoded = urllib.parse.quote(query)
-        url = (
-            f"https://content.guardianapis.com/search"
-            f"?q={encoded}&page-size={max_results}"
-            f"&order-by=newest&api-key={api_key}"
-        )
-
         req = urllib.request.Request(url, headers={"User-Agent": "WorldNewsMap/1.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
         articles = []
-        for result in data.get("response", {}).get("results", []):
+        for item in data.get("articles", []):
+            title = item.get("title", "").strip()
+            # Skip empty, very short, or junk titles
+            if not title or len(title) < 15:
+                continue
+            # Skip titles that are just the domain name
+            domain = item.get("domain", "")
+            if title.lower() == domain.lower():
+                continue
+
             articles.append({
-                "title": result.get("webTitle", "").strip(),
-                "url": result.get("webUrl", "").strip(),
-                "source": "The Guardian",
-                "published": result.get("webPublicationDate", ""),
-                "lang": "en",
+                "title": title,
+                "url": item.get("url", ""),
+                "source": domain,
+                "lang": item.get("language", "English"),
+                "seendate": item.get("seendate", ""),
             })
 
         return articles
-    except Exception as e:
-        print(f"    ✗ Guardian fetch failed for '{query}': {e}")
+    except Exception:
         return []
 
 
-# ── Build search queries from hotspot data ──────────────────────
-def build_query(hotspot):
+def build_enrichment_groups(hotspots):
     """
-    Construct a search query from a hotspot's location and category.
-    Aims for specific, relevant results.
+    Group hotspots by location+category to deduplicate API calls.
+    Returns dict of (city, country, primary_category) -> list of hotspot indices.
     """
-    city = hotspot["city"]
-    country = hotspot["country"]
-    cat = hotspot["categories"][0] if hotspot["categories"] else ""
+    groups = defaultdict(list)
 
-    # Category-specific keywords for better relevance
-    cat_keywords = {
-        "conflict": "conflict violence",
-        "politics": "politics government",
-        "economy": "economy market",
-        "environment": "environment climate",
-        "humanitarian": "humanitarian aid crisis",
-        "health": "health medical",
-        "positive": "breakthrough achievement",
-    }
+    for i, h in enumerate(hotspots):
+        city = h.get("city", "")
+        country = h.get("country", "")
+        cat = h["categories"][0] if h.get("categories") else "politics"
+        key = (city, country, cat)
+        groups[key].append(i)
 
-    keyword = cat_keywords.get(cat, "news")
-    return f"{city} {country} {keyword}"
+    return groups
 
 
-# ── Enrich hotspots with articles ───────────────────────────────
-def enrich(hotspots, guardian_api_key=None, max_hotspots=50, delay=1.0):
+def pick_best_summary(articles):
     """
-    Enrich the top N hotspots with readable articles.
-    Adds an 'articles' list to each hotspot dict.
+    From a list of article titles, pick the best one as the summary.
+    Prefers: longer titles, from reputable sources, not clickbait.
+    """
+    if not articles:
+        return None
+
+    # Score each article
+    scored = []
+    for a in articles:
+        title = a["title"]
+        score = len(title)  # Longer titles tend to be more descriptive
+
+        # Boost reputable sources
+        domain = a.get("source", "").lower()
+        reputable = ["reuters", "bbc", "aljazeera", "apnews", "guardian",
+                     "nytimes", "washingtonpost", "france24", "dw.com",
+                     "afp", "nhk", "thehindu", "scmp"]
+        if any(r in domain for r in reputable):
+            score += 30
+
+        # Penalize very long titles (likely multi-headline pages)
+        if len(title) > 150:
+            score -= 20
+
+        # Penalize titles with common clickbait patterns
+        lower = title.lower()
+        if any(p in lower for p in ["you won't believe", "shocking", "click here",
+                                     "subscribe", "watch:", "live:", "update:"]):
+            score -= 40
+
+        scored.append((score, a))
+
+    scored.sort(key=lambda x: -x[0])
+    return scored[0][1]["title"] if scored else None
+
+
+def enrich(hotspots, max_queries=1500, delay=0.4):
+    """
+    Enrich hotspots with real article headlines from GDELT DOC 2.0 API.
+
+    Strategy:
+    1. Group events by (city, country, category) to deduplicate
+    2. Query DOC API once per unique group
+    3. Distribute articles and best headline to all events in that group
+    4. Events in groups that weren't queried keep their template summaries
 
     Args:
         hotspots: list of hotspot dicts from gdelt_collector
-        guardian_api_key: optional Guardian API key (free tier)
-        max_hotspots: limit enrichment to top N by intensity
-        delay: seconds between RSS requests to be polite
+        max_queries: maximum number of API calls (default 1500)
+        delay: seconds between API calls (default 0.4)
     """
-    print(f"[Article Enricher]")
-    print(f"  Enriching top {min(max_hotspots, len(hotspots))} hotspots...")
+    print("[Article Enricher — GDELT DOC API]")
 
-    enriched_count = 0
+    groups = build_enrichment_groups(hotspots)
+    print(f"  {len(hotspots):,} events -> {len(groups):,} unique location+category groups")
 
-    for i, hotspot in enumerate(hotspots[:max_hotspots]):
-        query = build_query(hotspot)
-        articles = []
+    # Sort groups by total intensity (sum of all events in group)
+    # so we prioritize the biggest stories
+    group_scores = {}
+    for key, indices in groups.items():
+        total_intensity = sum(hotspots[i].get("intensity", 0) for i in indices)
+        group_scores[key] = total_intensity
 
-        # 1. GDELT source URLs (already have these)
-        gdelt_urls = hotspot.get("sourceUrls", [])
-        for url in gdelt_urls[:3]:
-            # Extract domain as source name
-            try:
-                domain = urllib.parse.urlparse(url).netloc
-                domain = re.sub(r'^www\.', '', domain)
-            except:
-                domain = "News Source"
+    sorted_groups = sorted(groups.items(), key=lambda x: -group_scores[x[0]])
 
-            articles.append({
-                "title": f"Source report from {domain}",
-                "url": url,
-                "source": domain,
-                "lang": "en",
-            })
+    # Limit queries
+    query_groups = sorted_groups[:max_queries]
+    print(f"  Enriching top {len(query_groups):,} groups...")
 
-        # 2. Google News RSS
-        rss_articles = fetch_google_news_rss(query, max_results=3)
-        articles.extend(rss_articles)
+    enriched = 0
+    failed = 0
 
-        # 3. Guardian API (if key provided)
-        guardian_articles = fetch_guardian_articles(query, api_key=guardian_api_key, max_results=2)
-        articles.extend(guardian_articles)
+    for idx, (key, indices) in enumerate(query_groups):
+        city, country, cat = key
 
-        # Deduplicate by URL
-        seen_urls = set()
-        unique_articles = []
-        for a in articles:
-            if a["url"] not in seen_urls:
-                seen_urls.add(a["url"])
-                unique_articles.append(a)
+        # Use the search query from the highest-intensity event in this group
+        best_idx = max(indices, key=lambda i: hotspots[i].get("intensity", 0))
+        query = hotspots[best_idx].get("searchQuery", f"{city} {country}")
 
-        hotspot["articles"] = unique_articles[:6]  # Cap at 6 articles per hotspot
+        if not query or len(query.strip()) < 3:
+            continue
 
-        if unique_articles:
-            enriched_count += 1
+        articles = fetch_doc_api(query, max_records=5, timespan="3d")
+
+        if articles:
+            best_title = pick_best_summary(articles)
+
+            # Distribute to all events in this group
+            for i in indices:
+                hotspots[i]["articles"] = [
+                    {
+                        "title": a["title"],
+                        "url": a["url"],
+                        "source": a["source"],
+                        "lang": a.get("lang", "en"),
+                    }
+                    for a in articles[:5]
+                ]
+                # Replace template summary with real headline if available
+                if best_title:
+                    hotspots[i]["summary"] = best_title
+
+            enriched += 1
+        else:
+            failed += 1
+
+        # Progress logging every 100 queries
+        if (idx + 1) % 100 == 0:
+            print(f"    Progress: {idx + 1}/{len(query_groups)} queries "
+                  f"({enriched} enriched, {failed} no results)")
 
         # Rate limit
-        if i < max_hotspots - 1 and (rss_articles or guardian_articles):
+        if delay > 0:
             sleep(delay)
 
-    # For hotspots beyond max_hotspots, add GDELT URLs only
-    for hotspot in hotspots[max_hotspots:]:
-        articles = []
-        for url in hotspot.get("sourceUrls", [])[:3]:
-            try:
-                domain = urllib.parse.urlparse(url).netloc
-                domain = re.sub(r'^www\.', '', domain)
-            except:
-                domain = "News Source"
-            articles.append({
-                "title": f"Source report from {domain}",
-                "url": url,
-                "source": domain,
-                "lang": "en",
-            })
-        hotspot["articles"] = articles
+    # For unenriched events, keep template summary and add source URL as article
+    for h in hotspots:
+        if "articles" not in h or not h["articles"]:
+            articles = []
+            for url in h.get("sourceUrls", [])[:1]:
+                try:
+                    domain = urllib.parse.urlparse(url).netloc.replace("www.", "")
+                except Exception:
+                    domain = "Source"
+                articles.append({
+                    "title": "Read full report",
+                    "url": url,
+                    "source": domain,
+                    "lang": "en",
+                })
+            h["articles"] = articles
 
-    print(f"  ✓ Enriched {enriched_count} hotspots with external articles")
+    total_enriched_events = sum(
+        1 for h in hotspots if h.get("articles") and h["articles"][0].get("title", "") != "Read full report"
+    )
+
+    print(f"  Enriched {enriched:,} groups ({total_enriched_events:,} events) with real headlines")
+    print(f"    {failed:,} groups returned no results (kept template summaries)")
+
     return hotspots
 
 
 if __name__ == "__main__":
-    # Quick test with fake hotspot
-    test_hotspot = {
-        "city": "Nairobi",
-        "country": "Kenya",
-        "categories": ["politics"],
-        "sourceUrls": [],
-    }
-    enriched = enrich([test_hotspot], max_hotspots=1, delay=0)
+    # Quick test
+    test = [
+        {
+            "city": "Kyiv", "country": "Ukraine", "categories": ["conflict"],
+            "intensity": 95, "searchQuery": "Kyiv Ukraine military strike",
+            "summary": "template summary", "sourceUrls": [],
+        }
+    ]
+    enriched = enrich(test, max_queries=1, delay=0)
+    print(f"\nResult: {enriched[0]['summary']}")
     for a in enriched[0].get("articles", []):
         print(f"  {a['source']}: {a['title']}")
-        print(f"    {a['url']}")
