@@ -10,1069 +10,432 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg-primary: #0a0e17;
-    --bg-secondary: #111827;
-    --bg-card: #1a2235;
-    --text-primary: #e8ecf4;
-    --text-secondary: #8896b0;
-    --text-muted: #4a5568;
-    --accent: #3b82f6;
-    --border: #1e2d45;
-    --cat-all: #3b82f6;
-    --cat-conflict: #ef4444;
-    --cat-politics: #8b5cf6;
-    --cat-economy: #10b981;
-    --cat-environment: #06b6d4;
-    --cat-humanitarian: #f59e0b;
-    --cat-health: #ec4899;
-    --cat-positive: #22d3ee;
+    --bg: #0a0e17; --card: #1a2235; --text: #e8ecf4; --dim: #8896b0;
+    --muted: #4a5568; --accent: #3b82f6; --border: #1e2d45;
   }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); overflow:hidden; height:100vh; }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* Header */
+  #header { position:fixed; top:0; left:0; right:0; z-index:1000;
+    background:linear-gradient(180deg,rgba(10,14,23,.97) 0%,rgba(10,14,23,.85) 80%,rgba(10,14,23,0) 100%);
+    padding:12px 20px 24px; pointer-events:none; }
+  #header-inner { pointer-events:auto; display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .logo { display:flex; align-items:center; gap:8px; }
+  .logo-icon { width:28px; height:28px; background:var(--accent); border-radius:7px;
+    display:flex; align-items:center; justify-content:center; font-size:14px;
+    box-shadow:0 0 16px rgba(59,130,246,.3); }
+  .logo-text { font-family:'Space Mono',monospace; font-size:14px; font-weight:700; letter-spacing:-.5px; }
+  .logo-text span { color:var(--accent); }
 
-  body {
-    font-family: 'DM Sans', sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    overflow: hidden;
-    height: 100vh;
-    width: 100vw;
-  }
+  /* Buttons */
+  .cat-btn { font-family:'DM Sans',sans-serif; font-size:11px; font-weight:600; padding:5px 12px;
+    border-radius:16px; border:1px solid var(--border); background:transparent; color:var(--dim);
+    cursor:pointer; transition:all .2s; text-transform:uppercase; letter-spacing:.4px; }
+  .cat-btn:hover { border-color:var(--dim); color:var(--text); }
+  .cat-btn.active { color:#fff; border-color:transparent; }
+  .cat-btn[data-cat="all"].active { background:#3b82f6; }
+  .cat-btn[data-cat="conflict"].active { background:#ef4444; }
+  .cat-btn[data-cat="politics"].active { background:#8b5cf6; }
+  .cat-btn[data-cat="economy"].active { background:#10b981; }
+  .cat-btn[data-cat="environment"].active { background:#06b6d4; }
+  .cat-btn[data-cat="humanitarian"].active { background:#f59e0b; }
+  .cat-btn[data-cat="health"].active { background:#ec4899; }
+  .cat-btn[data-cat="positive"].active { background:#22d3ee; }
+  .view-toggle { border-color:var(--accent)!important; color:var(--accent)!important; margin-left:4px; }
 
-  /* ── Header ── */
-  #header {
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    z-index: 1000;
-    background: linear-gradient(180deg, rgba(10,14,23,0.97) 0%, rgba(10,14,23,0.85) 80%, rgba(10,14,23,0) 100%);
-    padding: 16px 24px 28px;
-    pointer-events: none;
-  }
+  /* Source slider */
+  .slider-wrap { display:flex; align-items:center; gap:5px; margin-left:6px; }
+  .slider-label { font-size:9px; color:var(--dim); white-space:nowrap; font-family:'Space Mono',monospace; }
+  .slider-label span { color:var(--accent); font-weight:700; }
+  .slider-input { width:70px; height:3px; -webkit-appearance:none; background:var(--border); border-radius:2px; outline:none; }
+  .slider-input::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:var(--accent); cursor:pointer; }
 
-  #header-inner {
-    pointer-events: auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
+  /* Map */
+  #map { position:absolute; top:0; left:0; right:0; bottom:0; z-index:1; background:var(--bg); }
+  .leaflet-tile-pane { filter:brightness(.6) contrast(1.15) saturate(.2) hue-rotate(180deg) invert(1); }
+  .leaflet-control-zoom, .leaflet-control-attribution { display:none!important; }
 
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  /* Popups */
+  .leaflet-popup-content-wrapper { background:var(--card)!important; color:var(--text)!important;
+    border-radius:10px!important; border:1px solid var(--border)!important;
+    box-shadow:0 12px 40px rgba(0,0,0,.5)!important; min-width:240px; max-width:340px; }
+  .leaflet-popup-tip { background:var(--card)!important; }
+  .leaflet-popup-close-button { color:var(--dim)!important; font-size:16px!important; top:6px!important; right:8px!important; }
+  .popup-header { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
+  .popup-city { font-family:'Space Mono',monospace; font-size:13px; font-weight:700; }
+  .popup-country { font-size:10px; color:var(--dim); }
+  .popup-badge { font-size:9px; font-weight:700; padding:2px 7px; border-radius:8px; color:#fff; text-transform:uppercase; letter-spacing:.3px; }
+  .popup-stats { display:flex; gap:10px; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+  .popup-stat { text-align:center; flex:1; }
+  .popup-stat-val { font-family:'Space Mono',monospace; font-size:14px; font-weight:700; }
+  .popup-stat-lbl { font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px; }
+  .popup-summary { font-size:11.5px; line-height:1.45; color:var(--dim); margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+  .popup-articles { list-style:none; }
+  .popup-articles li { margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid rgba(30,45,69,.4); }
+  .popup-articles li:last-child { border-bottom:none; margin-bottom:0; padding-bottom:0; }
+  .popup-articles a { color:var(--text); text-decoration:none; font-size:11.5px; line-height:1.35; display:block; transition:color .2s; }
+  .popup-articles a:hover { color:var(--accent); }
+  .popup-articles .src { font-size:9px; color:var(--muted); margin-top:1px; }
 
-  .logo-icon {
-    width: 32px; height: 32px;
-    background: var(--accent);
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    box-shadow: 0 0 20px rgba(59,130,246,0.3);
-  }
+  /* Story list popup (heatmap mode) */
+  .popup-story-list { list-style:none; max-height:260px; overflow-y:auto; }
+  .popup-story-list li { padding:5px 0; border-bottom:1px solid rgba(30,45,69,.4); font-size:11px; line-height:1.35; }
+  .popup-story-list li:last-child { border-bottom:none; }
 
-  .logo-text {
-    font-family: 'Space Mono', monospace;
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-  }
+  /* Leaderboard */
+  .lb { position:fixed; top:60px; right:0; bottom:70px; width:260px; z-index:999;
+    background:rgba(26,34,53,.95); backdrop-filter:blur(12px); border-left:1px solid var(--border);
+    display:flex; flex-direction:column; transition:transform .3s; }
+  .lb.hidden { transform:translateX(260px); }
+  .lb-toggle { position:absolute; left:-28px; top:50%; transform:translateY(-50%);
+    width:26px; height:44px; background:rgba(26,34,53,.95); border:1px solid var(--border); border-right:none;
+    border-radius:6px 0 0 6px; color:var(--dim); font-size:11px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; }
+  .lb-toggle:hover { color:var(--text); }
+  .lb-head { padding:12px 14px 8px; border-bottom:1px solid var(--border); }
+  .lb-title { font-family:'Space Mono',monospace; font-size:10px; text-transform:uppercase;
+    letter-spacing:1px; color:var(--dim); margin-bottom:6px; }
+  .lb-tabs { display:flex; gap:4px; }
+  .lb-tab { font-family:'DM Sans',sans-serif; font-size:10px; font-weight:600; padding:3px 8px;
+    border-radius:10px; border:1px solid var(--border); background:transparent; color:var(--dim);
+    cursor:pointer; transition:all .2s; }
+  .lb-tab:hover { border-color:var(--dim); color:var(--text); }
+  .lb-tab.active { background:var(--accent); color:#fff; border-color:transparent; }
+  .lb-list { flex:1; overflow-y:auto; padding:6px 0; }
+  .lb-row { display:flex; align-items:center; padding:6px 14px; cursor:pointer; transition:background .15s; gap:8px; }
+  .lb-row:hover { background:rgba(59,130,246,.08); }
+  .lb-rank { font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); width:18px; text-align:right; flex-shrink:0; }
+  .lb-name { flex:1; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lb-val { font-family:'Space Mono',monospace; font-size:10px; color:var(--accent); flex-shrink:0; }
+  .lb-bar-bg { width:40px; height:3px; background:var(--border); border-radius:2px; flex-shrink:0; }
+  .lb-bar { height:100%; border-radius:2px; background:var(--accent); }
 
-  .logo-text span { color: var(--accent); }
+  /* Info panel */
+  #info { position:fixed; bottom:16px; right:16px; z-index:998; background:rgba(26,34,53,.92);
+    backdrop-filter:blur(12px); border:1px solid var(--border); border-radius:10px; padding:10px 14px; font-size:10px; text-align:right; }
+  .info-row { display:flex; align-items:center; justify-content:flex-end; gap:6px; margin-bottom:3px; }
+  .info-val { font-family:'Space Mono',monospace; font-weight:700; color:var(--accent); }
+  .info-lbl { color:var(--dim); }
+  .info-time { color:var(--muted); font-size:9px; margin-top:4px; }
 
-  /* ── Category Tabs ── */
-  #categories {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
+  /* Legend */
+  #legend { position:fixed; bottom:16px; left:16px; z-index:998; background:rgba(26,34,53,.92);
+    backdrop-filter:blur(12px); border:1px solid var(--border); border-radius:10px; padding:10px 14px; font-size:10px; }
+  #legend h4 { font-family:'Space Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); margin-bottom:6px; }
+  .leg-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+  .leg-dot { border-radius:50%; flex-shrink:0; }
 
-  .cat-btn {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 6px 14px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.25s ease;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
+  /* Cluster markers */
+  .marker-cluster { background:rgba(59,130,246,.25)!important; border:2px solid rgba(59,130,246,.5)!important; }
+  .marker-cluster div { background:rgba(59,130,246,.7)!important; color:#fff!important;
+    font-family:'Space Mono',monospace!important; font-size:10px!important; font-weight:700!important; }
+  .marker-cluster-small { background:rgba(59,130,246,.2)!important; }
+  .marker-cluster-small div { background:rgba(59,130,246,.6)!important; }
+  .marker-cluster-medium { background:rgba(245,158,11,.2)!important; }
+  .marker-cluster-medium div { background:rgba(245,158,11,.6)!important; }
+  .marker-cluster-large { background:rgba(239,68,68,.25)!important; }
+  .marker-cluster-large div { background:rgba(239,68,68,.7)!important; }
 
-  .cat-btn:hover {
-    border-color: var(--text-secondary);
-    color: var(--text-primary);
-  }
+  /* Loading */
+  #loader { position:fixed; inset:0; z-index:2000; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; transition:opacity .6s; }
+  #loader.done { opacity:0; pointer-events:none; }
+  .spin { width:40px; height:40px; border:3px solid var(--border); border-top-color:var(--accent);
+    border-radius:50%; animation:sp .8s linear infinite; }
+  .spin-text { margin-top:12px; font-family:'Space Mono',monospace; font-size:11px; color:var(--dim);
+    letter-spacing:1px; text-transform:uppercase; }
+  @keyframes sp { to { transform:rotate(360deg); } }
 
-  .cat-btn.active {
-    color: #fff;
-    border-color: transparent;
-  }
-
-  .cat-btn[data-cat="all"].active { background: var(--cat-all); box-shadow: 0 0 16px rgba(59,130,246,0.35); }
-  .cat-btn[data-cat="conflict"].active { background: var(--cat-conflict); box-shadow: 0 0 16px rgba(239,68,68,0.35); }
-  .cat-btn[data-cat="politics"].active { background: var(--cat-politics); box-shadow: 0 0 16px rgba(139,92,246,0.35); }
-  .cat-btn[data-cat="economy"].active { background: var(--cat-economy); box-shadow: 0 0 16px rgba(16,185,129,0.35); }
-  .cat-btn[data-cat="environment"].active { background: var(--cat-environment); box-shadow: 0 0 16px rgba(6,182,212,0.35); }
-  .cat-btn[data-cat="humanitarian"].active { background: var(--cat-humanitarian); box-shadow: 0 0 16px rgba(245,158,11,0.35); }
-  .cat-btn[data-cat="health"].active { background: var(--cat-health); box-shadow: 0 0 16px rgba(236,72,153,0.35); }
-  .cat-btn[data-cat="positive"].active { background: var(--cat-positive); box-shadow: 0 0 16px rgba(34,211,238,0.35); }
-
-  /* ── Map ── */
-  #map {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 1;
-    background: var(--bg-primary);
-  }
-
-  /* Dark map tiles */
-  .leaflet-tile-pane { filter: brightness(0.6) contrast(1.15) saturate(0.2) hue-rotate(180deg) invert(1); }
-  .leaflet-control-zoom { display: none; }
-  .leaflet-control-attribution { display: none !important; }
-
-  /* ── Popup Styling ── */
-  .leaflet-popup-content-wrapper {
-    background: var(--bg-card) !important;
-    color: var(--text-primary) !important;
-    border-radius: 12px !important;
-    border: 1px solid var(--border) !important;
-    box-shadow: 0 16px 48px rgba(0,0,0,0.5) !important;
-    min-width: 260px;
-    max-width: 340px;
-  }
-
-  .leaflet-popup-tip { background: var(--bg-card) !important; border: 1px solid var(--border) !important; }
-
-  .leaflet-popup-close-button {
-    color: var(--text-secondary) !important;
-    font-size: 18px !important;
-    top: 8px !important;
-    right: 10px !important;
-  }
-
-  .popup-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-
-  .popup-city {
-    font-family: 'Space Mono', monospace;
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .popup-country {
-    font-size: 11px;
-    color: var(--text-secondary);
-  }
-
-  .popup-badge {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: 10px;
-    color: #fff;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .popup-stats {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .popup-stat {
-    text-align: center;
-    flex: 1;
-  }
-
-  .popup-stat-value {
-    font-family: 'Space Mono', monospace;
-    font-size: 16px;
-    font-weight: 700;
-  }
-
-  .popup-stat-label {
-    font-size: 10px;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .popup-articles { list-style: none; }
-
-  .popup-articles li {
-    margin-bottom: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(30,45,69,0.5);
-  }
-
-  .popup-articles li:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-
-  .popup-articles a {
-    color: var(--text-primary);
-    text-decoration: none;
-    font-size: 12.5px;
-    line-height: 1.4;
-    display: block;
-    transition: color 0.2s;
-  }
-
-  .popup-articles a:hover { color: var(--accent); }
-
-  .popup-source {
-    font-size: 10px;
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-
-  /* ── Topic Sections ── */
-  .popup-topics {
-    margin-bottom: 10px;
-  }
-
-  .popup-topic {
-    padding: 8px 0;
-    border-bottom: 1px solid rgba(30,45,69,0.5);
-  }
-
-  .popup-topic:last-child { border-bottom: none; }
-
-  .popup-topic-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 4px;
-  }
-
-  .popup-topic-summary {
-    font-size: 11.5px;
-    line-height: 1.45;
-    color: var(--text-secondary);
-  }
-
-  /* ── View Toggle ── */
-  .view-toggle {
-    border-color: var(--accent) !important;
-    color: var(--accent) !important;
-    margin-left: 6px;
-  }
-  .view-toggle:hover {
-    background: rgba(59,130,246,0.15) !important;
-  }
-
-  /* ── Heatmap Popup (bulleted story list) ── */
-  .popup-story-list {
-    list-style: none;
-    max-height: 280px;
-    overflow-y: auto;
-    padding-right: 4px;
-  }
-
-  .popup-story-list li {
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(30,45,69,0.4);
-    font-size: 11.5px;
-    line-height: 1.4;
-  }
-
-  .popup-story-list li:last-child { border-bottom: none; }
-
-  .popup-story-list .story-badge {
-    display: inline-block;
-    font-size: 9px;
-    font-weight: 700;
-    padding: 1px 6px;
-    border-radius: 8px;
-    color: #fff;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    margin-right: 4px;
-    vertical-align: middle;
-  }
-
-  .popup-story-list .story-text {
-    color: var(--text-secondary);
-  }
-
-  .popup-story-list .story-sources {
-    color: var(--text-muted);
-    font-size: 10px;
-  }
-
-  .popup-story-list a {
-    color: var(--text-primary);
-    text-decoration: none;
-    font-size: 10px;
-  }
-  .popup-story-list a:hover { color: var(--accent); }
-
-  /* ── Legend ── */
-  #legend {
-    position: fixed;
-    bottom: 20px;
-    left: 20px;
-    z-index: 1000;
-    background: rgba(26,34,53,0.92);
-    backdrop-filter: blur(12px);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px 18px;
-    font-size: 11px;
-  }
-
-  #legend h4 {
-    font-family: 'Space Mono', monospace;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-secondary);
-    margin-bottom: 10px;
-  }
-
-  .legend-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-
-  .legend-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .legend-label { color: var(--text-secondary); }
-
-  /* ── Info Panel ── */
-  #info-panel {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    z-index: 1000;
-    background: rgba(26,34,53,0.92);
-    backdrop-filter: blur(12px);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px 18px;
-    font-size: 11px;
-    text-align: right;
-  }
-
-  #info-panel .stat-row {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-bottom: 4px;
-  }
-
-  #info-panel .stat-value {
-    font-family: 'Space Mono', monospace;
-    font-weight: 700;
-    color: var(--accent);
-  }
-
-  #info-panel .stat-label { color: var(--text-secondary); }
-
-  #info-panel .update-time {
-    color: var(--text-muted);
-    font-size: 10px;
-    margin-top: 6px;
-  }
-
-  /* ── Loading ── */
-  #loading-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 2000;
-    background: var(--bg-primary);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    transition: opacity 0.6s ease;
-  }
-
-  #loading-overlay.hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .loader {
-    width: 48px; height: 48px;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  .loader-text {
-    margin-top: 16px;
-    font-family: 'Space Mono', monospace;
-    font-size: 12px;
-    color: var(--text-secondary);
-    letter-spacing: 1px;
-    text-transform: uppercase;
-  }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  @keyframes pulse-ring {
-    0% { transform: scale(1); opacity: 0.5; }
-    100% { transform: scale(2.2); opacity: 0; }
-  }
-
-  /* ── Mobile ── */
-  @media (max-width: 768px) {
-    #header { padding: 10px 14px 20px; }
-    #categories { gap: 4px; }
-    .cat-btn { font-size: 10px; padding: 5px 10px; }
-    #legend { bottom: 10px; left: 10px; padding: 10px 14px; }
-    #info-panel { bottom: 10px; right: 10px; padding: 10px 14px; }
-  }
-
-  /* ── Cluster Markers ── */
-  .marker-cluster {
-    background: rgba(59,130,246,0.25) !important;
-    border: 2px solid rgba(59,130,246,0.5) !important;
-  }
-  .marker-cluster div {
-    background: rgba(59,130,246,0.7) !important;
-    color: #fff !important;
-    font-family: 'Space Mono', monospace !important;
-    font-size: 11px !important;
-    font-weight: 700 !important;
-  }
-  .marker-cluster-small {
-    background: rgba(59,130,246,0.2) !important;
-  }
-  .marker-cluster-small div {
-    background: rgba(59,130,246,0.6) !important;
-  }
-  .marker-cluster-medium {
-    background: rgba(245,158,11,0.2) !important;
-  }
-  .marker-cluster-medium div {
-    background: rgba(245,158,11,0.6) !important;
-  }
-  .marker-cluster-large {
-    background: rgba(239,68,68,0.25) !important;
-  }
-  .marker-cluster-large div {
-    background: rgba(239,68,68,0.7) !important;
+  /* Mobile */
+  @media(max-width:768px) {
+    #header { padding:8px 12px 18px; }
+    .cat-btn { font-size:9px; padding:4px 8px; }
+    .slider-wrap { display:none; }
+    .lb { width:200px; top:55px; }
+    #legend, #info { font-size:9px; padding:8px 10px; }
   }
 </style>
 </head>
 <body>
 
-<!-- Loading -->
-<div id="loading-overlay">
-  <div class="loader"></div>
-  <div class="loader-text">Scanning the globe...</div>
-</div>
+<div id="loader"><div class="spin"></div><div class="spin-text">Scanning the globe...</div></div>
 
-<!-- Header -->
-<div id="header">
-  <div id="header-inner">
-    <div class="logo">
-      <div class="logo-icon">◉</div>
-      <div class="logo-text"><span>WORLD</span>NEWS MAP</div>
-    </div>
-    <div id="categories">
-      <button class="cat-btn active" data-cat="all">All</button>
-      <button class="cat-btn" data-cat="conflict">Conflict</button>
-      <button class="cat-btn" data-cat="politics">Politics</button>
-      <button class="cat-btn" data-cat="economy">Economy</button>
-      <button class="cat-btn" data-cat="environment">Environment</button>
-      <button class="cat-btn" data-cat="humanitarian">Humanitarian</button>
-      <button class="cat-btn" data-cat="health">Health</button>
-      <button class="cat-btn" data-cat="positive">Positive</button>
-      <button class="cat-btn view-toggle" id="view-toggle" title="Switch view mode">⬡ DOTS</button>
+<div id="header"><div id="header-inner">
+  <div class="logo"><div class="logo-icon">◉</div><div class="logo-text"><span>WORLD</span>NEWS MAP</div></div>
+  <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
+    <button class="cat-btn active" data-cat="all">All</button>
+    <button class="cat-btn" data-cat="conflict">Conflict</button>
+    <button class="cat-btn" data-cat="politics">Politics</button>
+    <button class="cat-btn" data-cat="economy">Economy</button>
+    <button class="cat-btn" data-cat="environment">Environment</button>
+    <button class="cat-btn" data-cat="humanitarian">Humanitarian</button>
+    <button class="cat-btn" data-cat="health">Health</button>
+    <button class="cat-btn" data-cat="positive">Positive</button>
+    <button class="cat-btn view-toggle" id="viewBtn">⬡ DOTS</button>
+    <div class="slider-wrap">
+      <label class="slider-label">Sources ≥ <span id="srcVal">3</span></label>
+      <input type="range" id="srcSlider" min="1" max="20" value="3" class="slider-input">
     </div>
   </div>
-</div>
+</div></div>
 
-<!-- Map -->
 <div id="map"></div>
 
-<!-- Legend -->
-<div id="legend">
-  <h4>Intensity</h4>
-  <div class="legend-row">
-    <div class="legend-dot" style="background: #3b82f6; width: 8px; height: 8px;"></div>
-    <span class="legend-label">Low coverage</span>
+<div class="lb" id="lb">
+  <button class="lb-toggle" id="lbToggle">◀</button>
+  <div class="lb-head">
+    <div class="lb-title">Leaderboard</div>
+    <div class="lb-tabs">
+      <button class="lb-tab active" data-lb="continent">Continents</button>
+      <button class="lb-tab" data-lb="country">Countries</button>
+    </div>
   </div>
-  <div class="legend-row">
-    <div class="legend-dot" style="background: #f59e0b; width: 14px; height: 14px;"></div>
-    <span class="legend-label">Moderate</span>
-  </div>
-  <div class="legend-row">
-    <div class="legend-dot" style="background: #ef4444; width: 20px; height: 20px;"></div>
-    <span class="legend-label">High attention</span>
-  </div>
+  <div class="lb-list" id="lbList"></div>
 </div>
 
-<!-- Info Panel -->
-<div id="info-panel">
-  <div class="stat-row">
-    <span class="stat-label">Hotspots</span>
-    <span class="stat-value" id="stat-hotspots">0</span>
-  </div>
-  <div class="stat-row">
-    <span class="stat-label">Sources</span>
-    <span class="stat-value" id="stat-sources">0</span>
-  </div>
-  <div class="stat-row">
-    <span class="stat-label">Countries</span>
-    <span class="stat-value" id="stat-countries">0</span>
-  </div>
-  <div class="update-time" id="update-time">Loading...</div>
+<div id="legend">
+  <h4>Intensity</h4>
+  <div class="leg-row"><div class="leg-dot" style="background:#3b82f6;width:7px;height:7px;"></div><span style="color:var(--dim)">Low</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#f59e0b;width:11px;height:11px;"></div><span style="color:var(--dim)">Moderate</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#ef4444;width:16px;height:16px;"></div><span style="color:var(--dim)">High</span></div>
+</div>
+
+<div id="info">
+  <div class="info-row"><span class="info-lbl">Events</span><span class="info-val" id="sEvents">0</span></div>
+  <div class="info-row"><span class="info-lbl">Sources</span><span class="info-val" id="sSources">0</span></div>
+  <div class="info-row"><span class="info-lbl">Countries</span><span class="info-val" id="sCountries">0</span></div>
+  <div class="info-time" id="sTime">Loading...</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 <script>
-// ══════════════════════════════════════════════════
-// CONFIG
-// ══════════════════════════════════════════════════
-const CONFIG = {
-  // Set to a URL to fetch live data; null uses demo data
-  dataURL: './data/live.json',
-  refreshInterval: 15 * 60 * 1000, // 15 minutes
-  minSources: 2, // minimum NumSources threshold for GDELT filtering
+// ═══════════════════════════════════════════
+// CONFIG & STATE
+// ═══════════════════════════════════════════
+const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:3 };
+const CC = {
+  conflict:{b:'#ef4444',g:'rgba(239,68,68,.35)'},
+  politics:{b:'#8b5cf6',g:'rgba(139,92,246,.35)'},
+  economy:{b:'#10b981',g:'rgba(16,185,129,.35)'},
+  environment:{b:'#06b6d4',g:'rgba(6,182,212,.35)'},
+  humanitarian:{b:'#f59e0b',g:'rgba(245,158,11,.35)'},
+  health:{b:'#ec4899',g:'rgba(236,72,153,.35)'},
+  positive:{b:'#22d3ee',g:'rgba(34,211,238,.35)'},
 };
+const DC = {b:'#3b82f6',g:'rgba(59,130,246,.35)'};
+let map, markersLayer, heatLayer;
+let allData=[], hotspotData=[];
+let curCat='all', viewMode='dots', lbMode='continent';
 
-// ══════════════════════════════════════════════════
-// CATEGORY COLOR MAP
-// ══════════════════════════════════════════════════
-const CAT_COLORS = {
-  conflict:      { base: '#ef4444', glow: 'rgba(239,68,68,0.35)' },
-  politics:      { base: '#8b5cf6', glow: 'rgba(139,92,246,0.35)' },
-  economy:       { base: '#10b981', glow: 'rgba(16,185,129,0.35)' },
-  environment:   { base: '#06b6d4', glow: 'rgba(6,182,212,0.35)' },
-  humanitarian:  { base: '#f59e0b', glow: 'rgba(245,158,11,0.35)' },
-  health:        { base: '#ec4899', glow: 'rgba(236,72,153,0.35)' },
-  positive:      { base: '#22d3ee', glow: 'rgba(34,211,238,0.35)' },
-};
-
-// Fallback for unlabeled
-const DEFAULT_COLOR = { base: '#3b82f6', glow: 'rgba(59,130,246,0.35)' };
-
-// ══════════════════════════════════════════════════
-// DEMO DATA (Phase 1 hardcoded — replaced by GDELT in Phase 2)
-// ══════════════════════════════════════════════════
-const DEMO_DATA = [
-  {
-    lat: 6.52, lng: 3.38, city: "Lagos", country: "Nigeria", categories: ["economy","politics"],
-    intensity: 72, numSources: 48, avgTone: -3.2, goldstein: -2.0,
-    articles: [
-      { title: "Nigeria's central bank holds interest rates amid inflation pressure", url: "#", source: "Reuters", lang: "en" },
-      { title: "Lagos state government unveils new infrastructure spending plan", url: "#", source: "The Guardian NG", lang: "en" },
-      { title: "Youth unemployment protests grow across Nigerian cities", url: "#", source: "Al Jazeera", lang: "en" },
-    ]
-  },
-  {
-    lat: -6.21, lng: 106.85, city: "Jakarta", country: "Indonesia", categories: ["environment","humanitarian"],
-    intensity: 58, numSources: 35, avgTone: -5.8, goldstein: -4.0,
-    articles: [
-      { title: "Severe flooding displaces thousands in Greater Jakarta area", url: "#", source: "AP", lang: "en" },
-      { title: "Indonesia ramps up disaster preparedness as monsoon intensifies", url: "#", source: "BBC", lang: "en" },
-      { title: "Environmental groups call for urban planning reform after floods", url: "#", source: "The Jakarta Post", lang: "en" },
-    ]
-  },
-  {
-    lat: -23.55, lng: -46.63, city: "São Paulo", country: "Brazil", categories: ["economy"],
-    intensity: 45, numSources: 28, avgTone: 1.2, goldstein: 3.0,
-    articles: [
-      { title: "Brazil's Bovespa index reaches record high on commodity surge", url: "#", source: "Bloomberg", lang: "en" },
-      { title: "São Paulo tech sector reports 20% growth in startup funding", url: "#", source: "TechCrunch", lang: "en" },
-    ]
-  },
-  {
-    lat: -1.29, lng: 36.82, city: "Nairobi", country: "Kenya", categories: ["politics","conflict"],
-    intensity: 63, numSources: 41, avgTone: -6.1, goldstein: -5.0,
-    articles: [
-      { title: "Kenya opposition calls for nationwide protests over tax reform", url: "#", source: "AFP", lang: "en" },
-      { title: "Security forces deployed in Nairobi ahead of planned demonstrations", url: "#", source: "Reuters", lang: "en" },
-      { title: "East African diplomatic talks resume in Kenyan capital", url: "#", source: "DW", lang: "en" },
-    ]
-  },
-  {
-    lat: 19.08, lng: 72.88, city: "Mumbai", country: "India", categories: ["economy","health"],
-    intensity: 81, numSources: 67, avgTone: -1.5, goldstein: 1.0,
-    articles: [
-      { title: "India's pharmaceutical exports hit new annual record", url: "#", source: "The Hindu", lang: "en" },
-      { title: "Mumbai stock exchange sees highest trading volume this quarter", url: "#", source: "CNBC", lang: "en" },
-      { title: "Government launches expanded rural healthcare initiative", url: "#", source: "BBC", lang: "en" },
-    ]
-  },
-  {
-    lat: 30.04, lng: 31.24, city: "Cairo", country: "Egypt", categories: ["politics","economy"],
-    intensity: 52, numSources: 33, avgTone: -2.8, goldstein: -1.5,
-    articles: [
-      { title: "Egypt negotiates new IMF loan tranche amid currency pressures", url: "#", source: "Reuters", lang: "en" },
-      { title: "Suez Canal revenues decline as Red Sea shipping routes shift", url: "#", source: "Financial Times", lang: "en" },
-    ]
-  },
-  {
-    lat: 13.76, lng: 100.50, city: "Bangkok", country: "Thailand", categories: ["positive","economy"],
-    intensity: 38, numSources: 22, avgTone: 4.5, goldstein: 5.0,
-    articles: [
-      { title: "Thailand's tourism sector reaches pre-pandemic recovery milestone", url: "#", source: "AP", lang: "en" },
-      { title: "Bangkok named among top emerging tech hubs in Southeast Asia", url: "#", source: "Nikkei Asia", lang: "en" },
-    ]
-  },
-  {
-    lat: 19.43, lng: -99.13, city: "Mexico City", country: "Mexico", categories: ["conflict","humanitarian"],
-    intensity: 55, numSources: 31, avgTone: -7.2, goldstein: -6.0,
-    articles: [
-      { title: "Cartel violence escalates in northern Mexican border states", url: "#", source: "Reuters", lang: "en" },
-      { title: "Migrant shelter capacity overwhelmed as arrivals surge", url: "#", source: "Al Jazeera", lang: "en" },
-      { title: "Government announces expanded military deployment to Sinaloa", url: "#", source: "AP", lang: "en" },
-    ]
-  },
-  {
-    lat: 23.81, lng: 90.41, city: "Dhaka", country: "Bangladesh", categories: ["environment","humanitarian"],
-    intensity: 47, numSources: 26, avgTone: -4.9, goldstein: -3.5,
-    articles: [
-      { title: "Cyclone warning issued for Bangladesh coastal regions", url: "#", source: "BBC", lang: "en" },
-      { title: "Garment worker unions demand safety reforms after factory incidents", url: "#", source: "The Guardian", lang: "en" },
-    ]
-  },
-  {
-    lat: 4.71, lng: -74.07, city: "Bogotá", country: "Colombia", categories: ["politics","positive"],
-    intensity: 42, numSources: 24, avgTone: 2.1, goldstein: 4.0,
-    articles: [
-      { title: "Colombia peace process reaches landmark implementation milestone", url: "#", source: "Reuters", lang: "en" },
-      { title: "Bogotá elected 'most innovative city' in Latin America by regional body", url: "#", source: "AFP", lang: "en" },
-    ]
-  },
-  {
-    lat: 50.45, lng: 30.52, city: "Kyiv", country: "Ukraine", categories: ["conflict"],
-    intensity: 95, numSources: 112, avgTone: -8.1, goldstein: -9.5,
-    articles: [
-      { title: "Intense fighting continues along eastern front lines", url: "#", source: "Reuters", lang: "en" },
-      { title: "Ukrainian energy grid faces renewed attacks as winter approaches", url: "#", source: "AP", lang: "en" },
-      { title: "International aid pledges renewed at European summit", url: "#", source: "BBC", lang: "en" },
-    ]
-  },
-  {
-    lat: 14.60, lng: -17.44, city: "Dakar", country: "Senegal", categories: ["politics"],
-    intensity: 35, numSources: 18, avgTone: -3.0, goldstein: -2.5,
-    articles: [
-      { title: "Senegal's new government announces sweeping reform agenda", url: "#", source: "RFI", lang: "en" },
-      { title: "West African regional bloc holds summit in Dakar", url: "#", source: "AFP", lang: "en" },
-    ]
-  },
-  {
-    lat: 35.69, lng: 51.39, city: "Tehran", country: "Iran", categories: ["politics","conflict"],
-    intensity: 68, numSources: 52, avgTone: -5.5, goldstein: -7.0,
-    articles: [
-      { title: "Nuclear negotiations stall as new sanctions take effect", url: "#", source: "Reuters", lang: "en" },
-      { title: "Regional tensions rise following military exercises near strait", url: "#", source: "Al Jazeera", lang: "en" },
-      { title: "Domestic protests continue in major Iranian cities", url: "#", source: "BBC Persian", lang: "fa" },
-    ]
-  },
-  {
-    lat: -4.04, lng: 39.67, city: "Mombasa", country: "Kenya", categories: ["environment","positive"],
-    intensity: 28, numSources: 12, avgTone: 5.3, goldstein: 3.5,
-    articles: [
-      { title: "Coral reef restoration project shows promising recovery results", url: "#", source: "Nature", lang: "en" },
-      { title: "Mombasa marine conservation zone expanded after community effort", url: "#", source: "The Guardian", lang: "en" },
-    ]
-  },
-  {
-    lat: 33.89, lng: 35.50, city: "Beirut", country: "Lebanon", categories: ["economy","humanitarian"],
-    intensity: 60, numSources: 38, avgTone: -6.8, goldstein: -5.5,
-    articles: [
-      { title: "Lebanon's banking crisis deepens as currency hits new low", url: "#", source: "Reuters", lang: "en" },
-      { title: "UN agencies warn of growing humanitarian needs in Lebanon", url: "#", source: "UNHCR", lang: "en" },
-    ]
-  },
-];
-
-// ══════════════════════════════════════════════════
-// STATE
-// ══════════════════════════════════════════════════
-let map;
-let markersLayer;
-let heatmapLayer;
-let currentCategory = 'all';
-let viewMode = 'dots'; // 'dots' or 'heatmap'
-let hotspotData = [];
-
-// ══════════════════════════════════════════════════
-// INIT MAP
-// ══════════════════════════════════════════════════
-function initMap() {
-  map = L.map('map', {
-    center: [20, 15],
-    zoom: 3,
-    minZoom: 2,
-    maxZoom: 12,
-    zoomControl: false,
-    attributionControl: false,
-    worldCopyJump: true,
-  });
-
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    subdomains: 'abcd',
-    maxZoom: 19,
-  }).addTo(map);
-
+// ═══════════════════════════════════════════
+// MAP INIT
+// ═══════════════════════════════════════════
+function initMap(){
+  map = L.map('map',{center:[20,15],zoom:3,minZoom:2,maxZoom:12,zoomControl:false,attributionControl:false,worldCopyJump:true});
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19}).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
 }
 
-// ══════════════════════════════════════════════════
-// INTENSITY → VISUAL MAPPING
-// ══════════════════════════════════════════════════
-function getRadius(intensity) {
-  // Logarithmic scale so top stories clearly dominate
-  // but smaller ones remain visible. sqrt gives a nice spread.
-  // intensity 1-100 → radius 5-32
-  if (intensity <= 0) return 5;
-  return 5 + Math.sqrt(intensity / 100) * 27;
+// ═══════════════════════════════════════════
+// VISUAL HELPERS
+// ═══════════════════════════════════════════
+function getR(i){ return i<=0?4:4+Math.sqrt(i/100)*24; }
+function getC(i,cats){ const c=CC[cats&&cats[0]]||DC; return i>75?{b:lerp(c.b,'#ef4444',(i-75)/25),g:c.g}:c; }
+function lerp(a,b,t){
+  const ah=parseInt(a.replace('#',''),16),bh=parseInt(b.replace('#',''),16);
+  const r=Math.round(((ah>>16)&0xff)+(((bh>>16)&0xff)-((ah>>16)&0xff))*t);
+  const g=Math.round(((ah>>8)&0xff)+(((bh>>8)&0xff)-((ah>>8)&0xff))*t);
+  const bl=Math.round((ah&0xff)+((bh&0xff)-(ah&0xff))*t);
+  return `#${((1<<24)+(r<<16)+(g<<8)+bl).toString(16).slice(1)}`;
 }
 
-function getColor(intensity, categories) {
-  // Use the first category's color, or blend toward red for high intensity
-  const cat = categories && categories[0];
-  const catColor = CAT_COLORS[cat] || DEFAULT_COLOR;
-
-  if (intensity > 75) {
-    return { base: lerpColor(catColor.base, '#ef4444', (intensity - 75) / 25), glow: catColor.glow };
-  }
-  return catColor;
+// ═══════════════════════════════════════════
+// POPUP BUILDER
+// ═══════════════════════════════════════════
+function buildPopup(s){
+  const bc=(CC[s.categories?.[0]]||DC).b;
+  const tl=s.avgTone>2?'▲ Pos':s.avgTone<-2?'▼ Neg':'● Neu';
+  const tc=s.avgTone>2?'#22d3ee':s.avgTone<-2?'#ef4444':'#8896b0';
+  const sum=s.summary?`<div class="popup-summary">${s.summary}</div>`:'';
+  const arts=(s.articles||[]).map(a=>`<li><a href="${a.url}" target="_blank">${a.title}</a><div class="src">${a.source}${a.lang!=='en'?' · '+a.lang.toUpperCase():''}</div></li>`).join('');
+  return `
+    <div class="popup-header">
+      <div><div class="popup-city">${s.city}</div><div class="popup-country">${s.country}</div></div>
+      <span class="popup-badge" style="background:${bc};margin-left:auto">${s.categories?.[0]||'news'}</span>
+    </div>
+    <div class="popup-stats">
+      <div class="popup-stat"><div class="popup-stat-val">${s.numSources}</div><div class="popup-stat-lbl">Sources</div></div>
+      <div class="popup-stat"><div class="popup-stat-val" style="color:${tc}">${tl}</div><div class="popup-stat-lbl">Tone</div></div>
+    </div>
+    ${sum}
+    ${arts?'<ul class="popup-articles">'+arts+'</ul>':''}`;
 }
 
-function lerpColor(a, b, t) {
-  const ah = parseInt(a.replace('#',''), 16);
-  const bh = parseInt(b.replace('#',''), 16);
-  const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
-  const br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
-  const rr = Math.round(ar + (br - ar) * t);
-  const rg = Math.round(ag + (bg - ag) * t);
-  const rb = Math.round(ab + (bb - ab) * t);
-  return `#${((1 << 24) + (rr << 16) + (rg << 8) + rb).toString(16).slice(1)}`;
-}
-
-// ══════════════════════════════════════════════════
-// RENDER MARKERS
-// ══════════════════════════════════════════════════
-function renderMarkers(data, filter) {
+// ═══════════════════════════════════════════
+// RENDER: DOTS MODE
+// ═══════════════════════════════════════════
+function renderDots(data,filter){
   markersLayer.clearLayers();
-
-  const filtered = filter === 'all'
-    ? data
-    : data.filter(d => d.categories.includes(filter));
-
-  // Update stats
-  const countries = new Set(filtered.map(d => d.country));
-  const totalSources = filtered.reduce((s, d) => s + d.numSources, 0);
-  document.getElementById('stat-hotspots').textContent = filtered.length.toLocaleString();
-  document.getElementById('stat-sources').textContent = totalSources.toLocaleString();
-  document.getElementById('stat-countries').textContent = countries.size;
-
-  // Use MarkerClusterGroup for performance with thousands of markers
-  const clusterGroup = L.markerClusterGroup({
-    maxClusterRadius: 40,
-    spiderfyOnMaxZoom: true,
-    showCoverageOnHover: false,
-    zoomToBoundsOnClick: true,
-    disableClusteringAtZoom: 10,
-    chunkedLoading: true,
-    chunkInterval: 100,
-    chunkDelay: 10,
+  if(heatLayer){map.removeLayer(heatLayer);heatLayer=null;}
+  const f=filter==='all'?data:data.filter(d=>d.categories.includes(filter));
+  updateStats(f);
+  const cg=L.markerClusterGroup({maxClusterRadius:40,spiderfyOnMaxZoom:true,showCoverageOnHover:false,
+    zoomToBoundsOnClick:true,disableClusteringAtZoom:10,chunkedLoading:true,chunkInterval:100,chunkDelay:10});
+  const ms=[];
+  f.forEach(s=>{
+    const col=getC(s.intensity,s.categories);
+    const m=L.circleMarker([s.lat,s.lng],{radius:Math.max(getR(s.intensity)*.5,3),
+      fillColor:col.b,fillOpacity:.65,color:col.b,weight:1,opacity:.8});
+    m.bindPopup(buildPopup(s),{maxWidth:340});
+    ms.push(m);
   });
-
-  const markers = [];
-  filtered.forEach((spot) => {
-    const colors = getColor(spot.intensity, spot.categories);
-    const radius = getRadius(spot.intensity);
-
-    // Core dot only (no glow rings for individual events — too many)
-    const marker = L.circleMarker([spot.lat, spot.lng], {
-      radius: Math.max(radius * 0.5, 4), // Smaller dots since there are thousands
-      fillColor: colors.base,
-      fillOpacity: 0.65,
-      color: colors.base,
-      weight: 1,
-      opacity: 0.8,
-    });
-
-    // Build popup with summary
-    const badgeColor = CAT_COLORS[spot.categories[0]]?.base || DEFAULT_COLOR.base;
-    const toneLabel = spot.avgTone > 2 ? '▲ Positive' : spot.avgTone < -2 ? '▼ Negative' : '● Neutral';
-    const toneColor = spot.avgTone > 2 ? '#22d3ee' : spot.avgTone < -2 ? '#ef4444' : '#8896b0';
-
-    // Summary line
-    const summaryHTML = spot.summary
-      ? `<div class="popup-topic-summary" style="margin-bottom:10px;">${spot.summary}</div>`
-      : '';
-
-    // Article links
-    const articles = spot.articles || [];
-    let articlesHTML = '';
-    if (articles.length > 0) {
-      const items = articles.map(a => `
-        <li>
-          <a href="${a.url}" target="_blank" rel="noopener">${a.title}</a>
-          <div class="popup-source">${a.source}${a.lang !== 'en' ? ' · ' + a.lang.toUpperCase() : ''}</div>
-        </li>`).join('');
-      articlesHTML = `<ul class="popup-articles">${items}</ul>`;
-    }
-
-    const popup = `
-      <div class="popup-header">
-        <div>
-          <div class="popup-city">${spot.city}</div>
-          <div class="popup-country">${spot.country}</div>
-        </div>
-        <span class="popup-badge" style="background:${badgeColor};margin-left:auto;">
-          ${spot.categories[0]}
-        </span>
-      </div>
-      <div class="popup-stats">
-        <div class="popup-stat">
-          <div class="popup-stat-value">${spot.numSources}</div>
-          <div class="popup-stat-label">Sources</div>
-        </div>
-        <div class="popup-stat">
-          <div class="popup-stat-value" style="color:${toneColor}">${toneLabel}</div>
-          <div class="popup-stat-label">Tone</div>
-        </div>
-      </div>
-      ${summaryHTML}
-      ${articlesHTML}
-    `;
-
-    marker.bindPopup(popup, { maxWidth: 340 });
-    markers.push(marker);
-  });
-
-  clusterGroup.addLayers(markers);
-  markersLayer.addLayer(clusterGroup);
+  cg.addLayers(ms);
+  markersLayer.addLayer(cg);
 }
 
-// ══════════════════════════════════════════════════
-// HEATMAP RENDERING (Weather Forecast Mode)
-// ══════════════════════════════════════════════════
-function renderHeatmap(data, filter) {
+// ═══════════════════════════════════════════
+// RENDER: HEATMAP MODE
+// ═══════════════════════════════════════════
+function renderHeat(data,filter){
   markersLayer.clearLayers();
-  if (heatmapLayer) {
-    map.removeLayer(heatmapLayer);
-    heatmapLayer = null;
-  }
-
-  const filtered = filter === 'all'
-    ? data
-    : data.filter(d => d.categories.includes(filter));
-
-  // Update stats
-  const countries = new Set(filtered.map(d => d.country));
-  const totalSources = filtered.reduce((s, d) => s + d.numSources, 0);
-  document.getElementById('stat-hotspots').textContent = filtered.length.toLocaleString();
-  document.getElementById('stat-sources').textContent = totalSources.toLocaleString();
-  document.getElementById('stat-countries').textContent = countries.size;
-
-  // Build heatmap data: [lat, lng, intensity]
-  const heatData = filtered.map(spot => [
-    spot.lat, spot.lng, Math.max(spot.intensity / 100, 0.1)
-  ]);
-
-  // Create heatmap layer with weather-radar-style gradient
-  heatmapLayer = L.heatLayer(heatData, {
-    radius: 25,
-    blur: 20,
-    maxZoom: 10,
-    max: 1.0,
-    minOpacity: 0.3,
-    gradient: {
-      0.0: '#0a0e17',   // Dark base (barely visible)
-      0.15: '#1a237e',  // Deep navy
-      0.3: '#1565c0',   // Dark blue
-      0.45: '#2196f3',  // Blue
-      0.55: '#4caf50',  // Green
-      0.65: '#ffeb3b',  // Yellow
-      0.75: '#ff9800',  // Orange
-      0.85: '#f44336',  // Red
-      0.95: '#d50000',  // Deep red
-      1.0: '#ff1744',   // Bright red (hottest)
-    }
-  }).addTo(map);
-
-  // Add invisible click markers so users can click regions
-  // Group events by rounded location for click targets
-  const clickGroups = {};
-  filtered.forEach(spot => {
-    const key = `${Math.round(spot.lat)},${Math.round(spot.lng)}`;
-    if (!clickGroups[key]) {
-      clickGroups[key] = { lat: 0, lng: 0, stories: [], count: 0 };
-    }
-    const g = clickGroups[key];
-    g.lat += spot.lat;
-    g.lng += spot.lng;
-    g.count++;
-    if (g.stories.length < 20) { // Cap stories per click region
-      g.stories.push(spot);
-    }
-  });
-
-  Object.values(clickGroups).forEach(g => {
-    const lat = g.lat / g.count;
-    const lng = g.lng / g.count;
-
-    const clickMarker = L.circleMarker([lat, lng], {
-      radius: 18,
-      fillColor: 'transparent',
-      fillOpacity: 0,
-      stroke: false,
-      interactive: true,
-    });
-
-    // Build bulleted story list popup
-    const city = g.stories[0]?.city || 'Unknown';
-    const country = g.stories[0]?.country || '';
-
-    // Sort stories by intensity
-    g.stories.sort((a, b) => b.intensity - a.intensity);
-
-    const storyItems = g.stories.map(s => {
-      const badgeColor = CAT_COLORS[s.categories[0]]?.base || DEFAULT_COLOR.base;
-      const catLabel = s.categories[0] || 'news';
-      const sourceUrl = (s.articles && s.articles[0]) ? s.articles[0].url : (s.sourceUrls?.[0] || '#');
-      return `
-        <li>
-          <span class="story-badge" style="background:${badgeColor}">${catLabel}</span>
-          <span class="story-text">${s.summary || s.city + ': event'}</span>
-          <span class="story-sources">(${s.numSources} src)</span>
-          ${sourceUrl !== '#' ? `<a href="${sourceUrl}" target="_blank"> ↗</a>` : ''}
-        </li>`;
+  if(heatLayer){map.removeLayer(heatLayer);heatLayer=null;}
+  const f=filter==='all'?data:data.filter(d=>d.categories.includes(filter));
+  updateStats(f);
+  const pts=f.map(s=>[s.lat,s.lng,Math.max(s.intensity/100,.1)]);
+  heatLayer=L.heatLayer(pts,{radius:25,blur:20,maxZoom:10,max:1,minOpacity:.3,
+    gradient:{0:'#0a0e17',.15:'#1a237e',.3:'#1565c0',.45:'#2196f3',.55:'#4caf50',
+      .65:'#ffeb3b',.75:'#ff9800',.85:'#f44336',.95:'#d50000',1:'#ff1744'}}).addTo(map);
+  // Click regions
+  const grp={};
+  f.forEach(s=>{const k=Math.round(s.lat)+','+Math.round(s.lng);if(!grp[k])grp[k]={lat:0,lng:0,n:0,stories:[]};
+    const g=grp[k];g.lat+=s.lat;g.lng+=s.lng;g.n++;if(g.stories.length<20)g.stories.push(s);});
+  Object.values(grp).forEach(g=>{
+    const la=g.lat/g.n,lo=g.lng/g.n;
+    const cm=L.circleMarker([la,lo],{radius:18,fillOpacity:0,stroke:false,interactive:true});
+    g.stories.sort((a,b)=>b.intensity-a.intensity);
+    const items=g.stories.map(s=>{
+      const bc=(CC[s.categories?.[0]]||DC).b;
+      return `<li><span class="popup-badge" style="background:${bc};font-size:8px;padding:1px 5px;margin-right:3px">${s.categories?.[0]||''}</span><span style="color:var(--dim)">${s.summary||s.city}</span> <span style="color:var(--muted);font-size:9px">(${s.numSources})</span></li>`;
     }).join('');
-
-    const popup = `
-      <div class="popup-header">
-        <div>
-          <div class="popup-city">${city}</div>
-          <div class="popup-country">${country} — ${g.count} events in this area</div>
-        </div>
-      </div>
-      <ul class="popup-story-list">${storyItems}</ul>
-    `;
-
-    clickMarker.bindPopup(popup, { maxWidth: 380, maxHeight: 350 });
-    markersLayer.addLayer(clickMarker);
+    cm.bindPopup(`<div class="popup-header"><div><div class="popup-city">${g.stories[0]?.city||''}</div><div class="popup-country">${g.stories[0]?.country||''} — ${g.n} events</div></div></div><ul class="popup-story-list">${items}</ul>`,{maxWidth:380,maxHeight:320});
+    markersLayer.addLayer(cm);
   });
 }
 
-// ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════
+// STATS
+// ═══════════════════════════════════════════
+function updateStats(f){
+  const countries=new Set(f.map(d=>d.country));
+  document.getElementById('sEvents').textContent=f.length.toLocaleString();
+  document.getElementById('sSources').textContent=f.reduce((s,d)=>s+d.numSources,0).toLocaleString();
+  document.getElementById('sCountries').textContent=countries.size;
+}
+
+// ═══════════════════════════════════════════
 // RENDER DISPATCH
-// ══════════════════════════════════════════════════
-function render() {
-  // Clean up heatmap if switching away
-  if (viewMode !== 'heatmap' && heatmapLayer) {
-    map.removeLayer(heatmapLayer);
-    heatmapLayer = null;
-  }
-
-  if (viewMode === 'heatmap') {
-    renderHeatmap(hotspotData, currentCategory);
-  } else {
-    renderMarkers(hotspotData, currentCategory);
-  }
+// ═══════════════════════════════════════════
+function render(){
+  if(viewMode==='heatmap') renderHeat(hotspotData,curCat);
+  else renderDots(hotspotData,curCat);
 }
 
-// ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════
 // DATA LOADING
-// ══════════════════════════════════════════════════
-async function loadData() {
-  if (CONFIG.dataURL) {
-    try {
-      const res = await fetch(CONFIG.dataURL + '?t=' + Date.now());
-      const raw = await res.json();
-      // Data is wrapped in an envelope with a "hotspots" key
-      const data = raw.hotspots || raw;
-      // Apply minimum sources filter
-      hotspotData = data.filter(d => d.numSources >= CONFIG.minSources);
-    } catch (err) {
-      console.error('Failed to fetch live data, using demo:', err);
-      hotspotData = DEMO_DATA;
-    }
-  } else {
-    hotspotData = DEMO_DATA;
-  }
-
+// ═══════════════════════════════════════════
+async function loadData(){
+  try{
+    const r=await fetch(CONFIG.dataURL+'?t='+Date.now());
+    const raw=await r.json();
+    allData=(raw.hotspots||raw);
+    hotspotData=allData.filter(d=>d.numSources>=CONFIG.minSrc);
+  }catch(e){console.error('Load failed:',e);hotspotData=allData=[];}
   render();
-  document.getElementById('update-time').textContent =
-    'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  updateLB();
+  document.getElementById('sTime').textContent='Updated '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
 }
 
-// ══════════════════════════════════════════════════
-// CATEGORY BUTTONS
-// ══════════════════════════════════════════════════
-document.querySelectorAll('.cat-btn:not(.view-toggle)').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.cat-btn:not(.view-toggle)').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentCategory = btn.dataset.cat;
-    render();
+// ═══════════════════════════════════════════
+// LEADERBOARD
+// ═══════════════════════════════════════════
+const CONTINENT_BOUNDS={
+  'Africa':[[-35,-20],[37,52]],'Asia':[[-10,25],[55,145]],'Europe':[[35,-25],[72,45]],
+  'North America':[[5,-170],[72,-50]],'South America':[[-56,-82],[13,-34]],'Oceania':[[-47,110],[0,180]]
+};
+
+function updateLB(){
+  const f=curCat==='all'?hotspotData:hotspotData.filter(d=>d.categories.includes(curCat));
+  const el=document.getElementById('lbList');
+  if(lbMode==='continent'){
+    const m={};
+    f.forEach(d=>{const c=d.continent||'Other';if(!m[c])m[c]={n:0,s:0,co:new Set()};m[c].n++;m[c].s+=d.numSources;m[c].co.add(d.country);});
+    const sorted=Object.entries(m).map(([k,v])=>({name:k,n:v.n,s:v.s,co:v.co.size})).sort((a,b)=>b.n-a.n);
+    const mx=sorted[0]?.n||1;
+    el.innerHTML=sorted.map((c,i)=>`<div class="lb-row" data-cont="${c.name}"><span class="lb-rank">${i+1}</span><span class="lb-name">${c.name}</span><span class="lb-val">${c.n.toLocaleString()}</span><div class="lb-bar-bg"><div class="lb-bar" style="width:${c.n/mx*100}%"></div></div></div>`).join('');
+    el.querySelectorAll('.lb-row').forEach(r=>r.addEventListener('click',()=>{
+      const b=CONTINENT_BOUNDS[r.dataset.cont];if(b)map.fitBounds(b,{padding:[30,30]});
+    }));
+  } else {
+    const m={};
+    f.forEach(d=>{const c=d.country||'?';if(!m[c])m[c]={n:0,s:0};m[c].n++;m[c].s+=d.numSources;});
+    const sorted=Object.entries(m).map(([k,v])=>({name:k,n:v.n,s:v.s})).sort((a,b)=>b.n-a.n).slice(0,50);
+    const mx=sorted[0]?.n||1;
+    el.innerHTML=sorted.map((c,i)=>`<div class="lb-row" data-country="${c.name}"><span class="lb-rank">${i+1}</span><span class="lb-name">${c.name}</span><span class="lb-val">${c.n.toLocaleString()}</span><div class="lb-bar-bg"><div class="lb-bar" style="width:${c.n/mx*100}%"></div></div></div>`).join('');
+    el.querySelectorAll('.lb-row').forEach(r=>r.addEventListener('click',()=>{
+      const evts=hotspotData.filter(d=>d.country===r.dataset.country);
+      if(evts.length){
+        const lats=evts.map(d=>d.lat),lngs=evts.map(d=>d.lng);
+        map.fitBounds([[Math.min(...lats)-1,Math.min(...lngs)-1],[Math.max(...lats)+1,Math.max(...lngs)+1]],{padding:[30,30],maxZoom:8});
+      }
+    }));
+  }
+}
+
+// ═══════════════════════════════════════════
+// EVENT LISTENERS
+// ═══════════════════════════════════════════
+// Category buttons
+document.querySelectorAll('.cat-btn:not(.view-toggle)').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.cat-btn:not(.view-toggle)').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');curCat=b.dataset.cat;render();updateLB();
   });
 });
-
-// ══════════════════════════════════════════════════
-// VIEW MODE TOGGLE
-// ══════════════════════════════════════════════════
-document.getElementById('view-toggle').addEventListener('click', () => {
-  const btn = document.getElementById('view-toggle');
-  if (viewMode === 'dots') {
-    viewMode = 'heatmap';
-    btn.textContent = '◉ HEAT';
-    btn.style.background = 'rgba(239,68,68,0.2)';
-    btn.style.borderColor = '#ef4444';
-    btn.style.color = '#ef4444';
-  } else {
-    viewMode = 'dots';
-    btn.textContent = '⬡ DOTS';
-    btn.style.background = '';
-    btn.style.borderColor = '';
-    btn.style.color = '';
-  }
+// View toggle
+document.getElementById('viewBtn').addEventListener('click',()=>{
+  const b=document.getElementById('viewBtn');
+  if(viewMode==='dots'){viewMode='heatmap';b.textContent='◉ HEAT';b.style.cssText='border-color:#ef4444!important;color:#ef4444!important;background:rgba(239,68,68,.15)';}
+  else{viewMode='dots';b.textContent='⬡ DOTS';b.style.cssText='';}
   render();
 });
+// Source slider
+document.getElementById('srcSlider').addEventListener('input',e=>{
+  const v=parseInt(e.target.value);document.getElementById('srcVal').textContent=v;
+  CONFIG.minSrc=v;hotspotData=allData.filter(d=>d.numSources>=v);render();updateLB();
+});
+// Leaderboard tabs
+document.querySelectorAll('.lb-tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.lb-tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');lbMode=t.dataset.lb;updateLB();
+  });
+});
+// Leaderboard collapse
+document.getElementById('lbToggle').addEventListener('click',()=>{
+  const lb=document.getElementById('lb');lb.classList.toggle('hidden');
+  document.getElementById('lbToggle').textContent=lb.classList.contains('hidden')?'◀':'▶';
+});
 
-// ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════
 // BOOT
-// ══════════════════════════════════════════════════
-window.addEventListener('DOMContentLoaded', async () => {
-  initMap();
-  await loadData();
-
-  // Hide loader
-  setTimeout(() => {
-    document.getElementById('loading-overlay').classList.add('hidden');
-  }, 800);
-
-  // Auto-refresh if live
-  if (CONFIG.dataURL) {
-    setInterval(loadData, CONFIG.refreshInterval);
-  }
+// ═══════════════════════════════════════════
+window.addEventListener('DOMContentLoaded',async()=>{
+  initMap();await loadData();
+  setTimeout(()=>document.getElementById('loader').classList.add('done'),800);
+  if(CONFIG.dataURL)setInterval(loadData,CONFIG.refreshMs);
 });
 </script>
 </body>
