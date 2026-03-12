@@ -229,7 +229,7 @@
 // CONFIG & STATE
 // ═══════════════════════════════════════════
 const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:1 };
-const GROQ_KEY = '__GROQ_API_KEY__';
+const GROQ_PROXY_URL = '__GROQ_PROXY_URL__'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const CC = {
   conflict:{b:'#ef4444',g:'rgba(239,68,68,.35)'},
@@ -316,14 +316,14 @@ async function groqSummarize(popupId, hotspot) {
     return;
   }
 
-  // No key configured
-  if (!GROQ_KEY || GROQ_KEY === '__GROQ_API_KEY__') {
+  // No proxy configured
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') {
     el.textContent = '';
     el.className = 'popup-summary';
     return;
   }
 
-  // Rate limited — show manual retry button with countdown
+  // Rate limited — show countdown + retry
   if (groqRateLimited && Date.now() < groqRateLimitResetAt) {
     const secsLeft = Math.ceil((groqRateLimitResetAt - Date.now()) / 1000);
     el.innerHTML = `<span style="color:var(--muted);font-size:10px">Rate limited — resets in ${secsLeft}s</span>
@@ -338,25 +338,21 @@ async function groqSummarize(popupId, hotspot) {
   el.className = 'popup-summary loading';
 
   try {
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const resp = await fetch(GROQ_PROXY_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: GROQ_MODEL,
         messages: [
           { role: 'system', content: 'You are a neutral news headline writer. Given raw GDELT data about a location, write ONE unbiased factual headline of 10-20 words. No editorializing. No quotation marks. Just the headline text.' },
           { role: 'user', content: buildGroqContext(hotspot) }
         ],
-        max_tokens: 60,
-        temperature: 0.3,
       })
     });
 
     // Handle rate limit
     if (resp.status === 429) {
       groqRateLimited = true;
-      // Parse retry-after header or default to 60s
-      const retryAfter = parseInt(resp.headers.get('retry-after') || '60', 10);
+      const retryAfter = parseInt(resp.headers.get('Retry-After') || '60', 10);
       groqRateLimitResetAt = Date.now() + retryAfter * 1000;
       console.warn(`Groq rate limited, retry after ${retryAfter}s`);
       if (document.getElementById(popupId)) {
