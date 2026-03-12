@@ -11,7 +11,7 @@ permissions:
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -22,20 +22,38 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Authenticate to Google Cloud
+        run: |
+          echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp_sa_key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp_sa_key.json" >> $GITHUB_ENV
+
       - name: Run pipeline
         env:
-          NEWSMAP_MIN_SOURCES: '3'
-          NEWSMAP_MAX_AGE_HOURS: '36'
-          NEWSMAP_NUM_DAYS: '3'
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           NEWSMAP_OUTPUT: '../data/live.json'
+          NEWSMAP_FULL_HOURS: '36'
+          NEWSMAP_DELTA_MINUTES: '30'
+          NEWSMAP_MAX_AGE_HOURS: '36'
         run: |
           cd pipeline
           python orchestrator.py
+
+      - name: Inject Groq API key into frontend
+        run: |
+          # Replace placeholder in index.html with the actual key
+          sed -i "s|__GROQ_API_KEY__|${{ secrets.GROQ_API_KEY }}|g" index.html
 
       - name: Commit and push updated data
         run: |
           git config user.name "World News Map Bot"
           git config user.email "bot@worldnewsmap.dev"
-          git add data/live.json
+          git add data/live.json data/collector_state.json index.html
           git diff --cached --quiet || git commit -m "Update live data $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push
+
+      - name: Clean up credentials
+        if: always()
+        run: rm -f /tmp/gcp_sa_key.json
