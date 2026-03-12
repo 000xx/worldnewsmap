@@ -603,7 +603,7 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
 
 # ── State Management (for incremental mode) ──────────────────────
 
-STATE_FILE = "data/collector_state.json"
+STATE_FILE = "../data/collector_state.json"
 
 
 def load_state():
