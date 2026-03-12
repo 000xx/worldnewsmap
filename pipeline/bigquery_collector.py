@@ -51,7 +51,7 @@ def get_bq_client():
             f.write(sa_key)
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
 
-    return bigquery.Client(project=PROJECT_ID)
+    return bigquery.Client()
 
 
 # ── SQL Queries ──────────────────────────────────────────────────
