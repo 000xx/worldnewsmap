@@ -24,6 +24,7 @@ Auth: GOOGLE_APPLICATION_CREDENTIALS env var pointing to a service account JSON,
 import json
 import os
 import re
+import html
 import math
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
@@ -33,7 +34,8 @@ from google.cloud import bigquery
 
 # ── BigQuery Config ──────────────────────────────────────────────
 
-PROJECT_ID = "gdelt-bq"
+# The query runs under YOUR project (for billing), but reads from gdelt-bq's public tables.
+# Set NEWSMAP_GCP_PROJECT to your GCP project ID, or it will use the default from credentials.
 GKG_TABLE = "gdelt-bq.gdeltv2.gkg_partitioned"
 
 
@@ -42,6 +44,9 @@ def get_bq_client():
     Create a BigQuery client. Handles two auth patterns:
     1. GCP_SA_KEY env var (JSON string) — used in GitHub Actions
     2. GOOGLE_APPLICATION_CREDENTIALS file path — local dev
+
+    The client project (for billing) comes from the service account's project
+    or from NEWSMAP_GCP_PROJECT env var.
     """
     sa_key = os.environ.get("GCP_SA_KEY", "")
     if sa_key:
@@ -51,6 +56,10 @@ def get_bq_client():
             f.write(sa_key)
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
 
+    # Use explicit project if set, otherwise let credentials determine it
+    project = os.environ.get("NEWSMAP_GCP_PROJECT", None)
+    if project:
+        return bigquery.Client(project=project)
     return bigquery.Client()
 
 
@@ -60,18 +69,17 @@ def build_gkg_query(since_timestamp, until_timestamp=None):
     """
     Build SQL to fetch GKG records with locations from the partitioned table.
 
-    We pull: DATE, DocumentIdentifier (URL), SourceCommonName,
-    V2Locations, V2Counts, V2Themes, V2Persons, V2Organizations, V2Tone
+    Key fields:
+    - Extras: contains <PAGE_TITLE>headline</PAGE_TITLE> — the actual article headline
+    - V2Locations: semicolon-delimited geolocated mentions
+    - V2Counts: structured counts (killed, wounded, etc.)
+    - V2Themes, V2Persons: thematic and entity context
+    - V2Tone: sentiment scores
 
-    The _PARTITIONTIME filter ensures we only scan relevant partitions
-    (saves BigQuery quota — crucial on free tier).
-
-    DATE in GKG is YYYYMMDDHHMMSS as integer.
+    Uses DATE(_PARTITIONTIME) for partition pruning (Standard SQL).
+    DATE field is YYYYMMDDHHMMSS as integer.
     """
-    since_str = since_timestamp.strftime("%Y-%m-%d")
     since_int = int(since_timestamp.strftime("%Y%m%d%H%M%S"))
-
-    # Partition filter needs date-level granularity
     partition_since = since_timestamp.strftime("%Y-%m-%d")
 
     until_clause = ""
@@ -91,14 +99,15 @@ def build_gkg_query(since_timestamp, until_timestamp=None):
         V2Themes,
         V2Persons,
         V2Organizations,
-        V2Tone
+        V2Tone,
+        REGEXP_EXTRACT(Extras, r'<PAGE_TITLE>(.*?)</PAGE_TITLE>') AS PageTitle
     FROM `{GKG_TABLE}`
     WHERE DATE >= {since_int}
         {until_clause}
         AND DATE(_PARTITIONTIME) >= "{partition_since}"
         {partition_until}
         AND V2Locations IS NOT NULL
-        AND LENGTH(V2Locations) > 10
+        AND LENGTH(V2Locations) > 5
     """
     return query
 
@@ -455,10 +464,18 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
         source = row.SourceCommonName or ""
         date_int = row.DATE
 
-        # Parse article title from URL or source
-        # GKG doesn't have a title field — we'll use the source + themes
-        # The actual headline comes from the DocumentIdentifier page title
-        # which we don't have. We store the URL and source for Groq.
+        # Extract real article headline from Extras → PAGE_TITLE
+        title = ""
+        try:
+            raw_title = row.PageTitle or ""
+            if raw_title:
+                # Unescape HTML entities (&#x26; → &, etc.)
+                title = html.unescape(raw_title).strip()
+                # Skip if title is just the domain or too short
+                if len(title) < 10 or title.lower() == source.lower():
+                    title = ""
+        except Exception:
+            title = ""
 
         # Use the FIRST city-level location as primary
         primary_loc = None
@@ -481,6 +498,7 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
         cell["articles"].append({
             "url": url,
             "source": source,
+            "title": title,
             "tone": tone,
             "word_count": word_count,
             "date": date_int,
@@ -551,25 +569,38 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
             * (1 + abs(avg_tone) / 10)
         )
 
-        # Select top articles (reputable first, then by recency)
+        # Select top articles — prefer those with real headlines, reputable, recent
         sorted_articles = sorted(
             articles,
-            key=lambda a: (a["reputable"], a["date"]),
+            key=lambda a: (bool(a.get("title")), a["reputable"], a["date"]),
             reverse=True,
         )
         display_articles = []
         seen_sources = set()
-        for a in sorted_articles[:10]:
+        seen_titles = set()
+        for a in sorted_articles[:20]:
             if a["source"] in seen_sources:
                 continue
+            title = a.get("title", "")
+            # Dedupe by title prefix
+            title_key = title.lower()[:50] if title else a["url"]
+            if title_key in seen_titles:
+                continue
             seen_sources.add(a["source"])
+            seen_titles.add(title_key)
             display_articles.append({
                 "url": a["url"],
                 "source": a["source"],
+                "title": title,
                 "tone": round(a["tone"], 1),
             })
             if len(display_articles) >= 5:
                 break
+
+        # Collect all real headlines for Groq context
+        all_headlines = [a.get("title", "") for a in articles if a.get("title")]
+        # Deduplicate and take top 10
+        unique_headlines = list(dict.fromkeys(all_headlines))[:10]
 
         continent = COUNTRY_TO_CONTINENT.get(best_loc["country"], "Other")
 
@@ -584,6 +615,7 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
             "numArticles": num_articles,
             "avgTone": round(avg_tone, 2),
             "articles": display_articles,
+            "headlines": unique_headlines,
             "counts": dict(count_agg),
             "persons": top_persons,
             "themes": top_themes,
@@ -603,7 +635,7 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
 
 # ── State Management (for incremental mode) ──────────────────────
 
-STATE_FILE = "../data/collector_state.json"
+STATE_FILE = "data/collector_state.json"
 
 
 def load_state():
