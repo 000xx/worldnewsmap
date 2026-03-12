@@ -229,7 +229,7 @@
 // CONFIG & STATE
 // ═══════════════════════════════════════════
 const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:1 };
-const GROQ_PROXY_URL = 'https://still-leaf-983b.milo-borek.workers.dev'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
+const GROQ_PROXY_URL = '__GROQ_PROXY_URL__'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const CC = {
   conflict:{b:'#ef4444',g:'rgba(239,68,68,.35)'},
@@ -292,14 +292,17 @@ function buildGroqContext(hotspot) {
   parts.push(`Categories: ${(hotspot.categories||[]).join(', ')}`);
   parts.push(`Number of articles: ${hotspot.numArticles||0}`);
   parts.push(`Average tone: ${hotspot.avgTone||0}`);
-  if (hotspot.persons?.length) parts.push(`Key people: ${hotspot.persons.join(', ')}`);
-  if (hotspot.themes?.length) parts.push(`Themes: ${hotspot.themes.slice(0,8).join(', ')}`);
+  // Real article headlines — the most important context for generating a good summary
+  if (hotspot.headlines?.length) {
+    parts.push(`Article headlines from this location:\n- ${hotspot.headlines.slice(0,8).join('\n- ')}`);
+  }
+  if (hotspot.persons?.length) parts.push(`Key people mentioned: ${hotspot.persons.join(', ')}`);
   if (hotspot.counts && Object.keys(hotspot.counts).length) {
     const cs = Object.entries(hotspot.counts).map(([k,v])=>`${v.number} ${k.toLowerCase()}${v.object_type?' ('+v.object_type+')':''}`);
     parts.push(`Counts: ${cs.join(', ')}`);
   }
   if (hotspot.articles?.length) {
-    parts.push('Sources: ' + hotspot.articles.map(a=>a.source).join(', '));
+    parts.push('Sources: ' + hotspot.articles.map(a=>a.source).filter(Boolean).join(', '));
   }
   return parts.join('\n');
 }
@@ -317,7 +320,7 @@ async function groqSummarize(popupId, hotspot) {
   }
 
   // No proxy configured
-  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === 'https://still-leaf-983b.milo-borek.workers.dev') {
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') {
     el.textContent = '';
     el.className = 'popup-summary';
     return;
@@ -409,10 +412,10 @@ function buildPopup(s){
     personsHtml = `<div style="font-size:10px; color:var(--muted); margin-bottom:6px">👤 ${s.persons.slice(0,3).join(', ')}</div>`;
   }
 
-  // Articles (now just URL + source, no pre-generated titles)
+  // Articles — show real headline when available, fall back to source name
   const arts=(s.articles||[]).map(a=>{
-    const displayUrl = a.url ? new URL(a.url).hostname.replace('www.','') : a.source;
-    return `<li><a href="${a.url}" target="_blank">${a.source || displayUrl}</a><div class="src">Tone: ${a.tone>0?'+':''}${a.tone}</div></li>`;
+    const displayTitle = a.title || a.source || 'Read article';
+    return `<li><a href="${a.url}" target="_blank">${displayTitle}</a><div class="src">${a.source}${a.tone?(' · Tone: '+(a.tone>0?'+':'')+a.tone):''}</div></li>`;
   }).join('');
 
   // Store hotspot data on window for Groq callback
