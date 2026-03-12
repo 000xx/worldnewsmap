@@ -71,6 +71,19 @@
   .popup-stat-val { font-family:'Space Mono',monospace; font-size:14px; font-weight:700; }
   .popup-stat-lbl { font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px; }
   .popup-summary { font-size:11.5px; line-height:1.45; color:var(--dim); margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+  .popup-summary.loading { color:var(--muted); font-style:italic; }
+  .popup-summary.loading .summary-loading { display:inline-block; }
+  .popup-summary.loading .summary-loading::after {
+    content:''; display:inline-block; width:12px; text-align:left;
+    animation:dots 1.2s steps(4,end) infinite; }
+  @keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
+  .popup-summary.ai { color:var(--text); font-weight:500; }
+  .groq-btn { font-family:'DM Sans',sans-serif; font-size:10px; font-weight:600; padding:4px 10px;
+    border-radius:8px; border:1px solid var(--accent); background:rgba(59,130,246,.12); color:var(--accent);
+    cursor:pointer; transition:all .2s; display:inline-flex; align-items:center; gap:4px; margin-bottom:8px; }
+  .groq-btn:hover { background:rgba(59,130,246,.25); }
+  .groq-btn:disabled { opacity:.5; cursor:not-allowed; }
+  .groq-badge { font-size:8px; color:var(--muted); margin-top:2px; }
   .popup-articles { list-style:none; }
   .popup-articles li { margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid rgba(30,45,69,.4); }
   .popup-articles li:last-child { border-bottom:none; margin-bottom:0; padding-bottom:0; }
@@ -215,7 +228,9 @@
 // ═══════════════════════════════════════════
 // CONFIG & STATE
 // ═══════════════════════════════════════════
-const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:3 };
+const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:1 };
+const GROQ_KEY = '__GROQ_API_KEY__';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const CC = {
   conflict:{b:'#ef4444',g:'rgba(239,68,68,.35)'},
   politics:{b:'#8b5cf6',g:'rgba(139,92,246,.35)'},
@@ -237,6 +252,19 @@ function initMap(){
   map = L.map('map',{center:[20,15],zoom:3,minZoom:2,maxZoom:12,zoomControl:false,attributionControl:false,worldCopyJump:true});
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19}).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
+
+  // Auto-fire Groq summary when any popup opens
+  map.on('popupopen', function(e) {
+    const marker = e.popup._source;
+    if (marker && marker._hotspotData && marker._popupId) {
+      const pid = marker._popupId;
+      const hs = marker._hotspotData;
+      // Store ref for retry buttons
+      window['_hs_' + pid] = hs;
+      // Small delay to let DOM render
+      setTimeout(() => groqSummarize(pid, hs), 50);
+    }
+  });
 }
 
 // ═══════════════════════════════════════════
@@ -253,24 +281,158 @@ function lerp(a,b,t){
 }
 
 // ═══════════════════════════════════════════
+// GROQ AI SUMMARY (auto-fires on popup open)
+// ═══════════════════════════════════════════
+const summaryCache = {};
+let groqRateLimited = false;
+let groqRateLimitResetAt = 0;
+
+function buildGroqContext(hotspot) {
+  const parts = [`Location: ${hotspot.city}, ${hotspot.country}`];
+  parts.push(`Categories: ${(hotspot.categories||[]).join(', ')}`);
+  parts.push(`Number of articles: ${hotspot.numArticles||0}`);
+  parts.push(`Average tone: ${hotspot.avgTone||0}`);
+  if (hotspot.persons?.length) parts.push(`Key people: ${hotspot.persons.join(', ')}`);
+  if (hotspot.themes?.length) parts.push(`Themes: ${hotspot.themes.slice(0,8).join(', ')}`);
+  if (hotspot.counts && Object.keys(hotspot.counts).length) {
+    const cs = Object.entries(hotspot.counts).map(([k,v])=>`${v.number} ${k.toLowerCase()}${v.object_type?' ('+v.object_type+')':''}`);
+    parts.push(`Counts: ${cs.join(', ')}`);
+  }
+  if (hotspot.articles?.length) {
+    parts.push('Sources: ' + hotspot.articles.map(a=>a.source).join(', '));
+  }
+  return parts.join('\n');
+}
+
+async function groqSummarize(popupId, hotspot) {
+  const el = document.getElementById(popupId);
+  if (!el) return;
+
+  // Cache hit — instant
+  const cacheKey = `${hotspot.lat},${hotspot.lng}`;
+  if (summaryCache[cacheKey]) {
+    el.innerHTML = summaryCache[cacheKey] + '<div class="groq-badge">AI summary via Groq</div>';
+    el.className = 'popup-summary ai';
+    return;
+  }
+
+  // No key configured
+  if (!GROQ_KEY || GROQ_KEY === '__GROQ_API_KEY__') {
+    el.textContent = '';
+    el.className = 'popup-summary';
+    return;
+  }
+
+  // Rate limited — show manual retry button with countdown
+  if (groqRateLimited && Date.now() < groqRateLimitResetAt) {
+    const secsLeft = Math.ceil((groqRateLimitResetAt - Date.now()) / 1000);
+    el.innerHTML = `<span style="color:var(--muted);font-size:10px">Rate limited — resets in ${secsLeft}s</span>
+      <button class="groq-btn" style="margin-top:4px" onclick="groqRateLimited=false;groqSummarize('${popupId}', window['_hs_${popupId}'])">⚡ Retry</button>`;
+    el.className = 'popup-summary';
+    return;
+  }
+  groqRateLimited = false;
+
+  // Show loading
+  el.innerHTML = '<span class="summary-loading">Generating summary…</span>';
+  el.className = 'popup-summary loading';
+
+  try {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [
+          { role: 'system', content: 'You are a neutral news headline writer. Given raw GDELT data about a location, write ONE unbiased factual headline of 10-20 words. No editorializing. No quotation marks. Just the headline text.' },
+          { role: 'user', content: buildGroqContext(hotspot) }
+        ],
+        max_tokens: 60,
+        temperature: 0.3,
+      })
+    });
+
+    // Handle rate limit
+    if (resp.status === 429) {
+      groqRateLimited = true;
+      // Parse retry-after header or default to 60s
+      const retryAfter = parseInt(resp.headers.get('retry-after') || '60', 10);
+      groqRateLimitResetAt = Date.now() + retryAfter * 1000;
+      console.warn(`Groq rate limited, retry after ${retryAfter}s`);
+      if (document.getElementById(popupId)) {
+        document.getElementById(popupId).innerHTML = `<span style="color:var(--muted);font-size:10px">Rate limited — resets in ${retryAfter}s</span>
+          <button class="groq-btn" style="margin-top:4px" onclick="groqRateLimited=false;groqSummarize('${popupId}', window['_hs_${popupId}'])">⚡ Retry</button>`;
+        document.getElementById(popupId).className = 'popup-summary';
+      }
+      return;
+    }
+
+    const data = await resp.json();
+    if (data.error) {
+      throw new Error(data.error.message || 'API error');
+    }
+    const summary = data.choices?.[0]?.message?.content?.trim() || 'Unable to generate summary';
+    summaryCache[cacheKey] = summary;
+    if (document.getElementById(popupId)) {
+      document.getElementById(popupId).innerHTML = summary + '<div class="groq-badge">AI summary via Groq</div>';
+      document.getElementById(popupId).className = 'popup-summary ai';
+    }
+  } catch (e) {
+    console.error('Groq error:', e);
+    if (document.getElementById(popupId)) {
+      document.getElementById(popupId).innerHTML = `<span style="color:var(--muted);font-size:10px">${e.message||'Summary unavailable'}</span>
+        <button class="groq-btn" style="margin-top:4px" onclick="groqSummarize('${popupId}', window['_hs_${popupId}'])">⚡ Retry</button>`;
+      document.getElementById(popupId).className = 'popup-summary';
+    }
+  }
+}
+
+// ═══════════════════════════════════════════
 // POPUP BUILDER
 // ═══════════════════════════════════════════
+let popupCounter = 0;
 function buildPopup(s){
   const bc=(CC[s.categories?.[0]]||DC).b;
   const tl=s.avgTone>2?'▲ Pos':s.avgTone<-2?'▼ Neg':'● Neu';
   const tc=s.avgTone>2?'#22d3ee':s.avgTone<-2?'#ef4444':'#8896b0';
-  const sum=s.summary?`<div class="popup-summary">${s.summary}</div>`:'';
-  const arts=(s.articles||[]).map(a=>`<li><a href="${a.url}" target="_blank">${a.title}</a><div class="src">${a.source}${a.lang!=='en'?' · '+a.lang.toUpperCase():''}</div></li>`).join('');
+  const pid = 'sum-' + (popupCounter++);
+
+  // Counts display
+  let countsHtml = '';
+  if (s.counts && Object.keys(s.counts).length) {
+    const cs = Object.entries(s.counts).map(([k,v])=>{
+      const label = k.charAt(0)+k.slice(1).toLowerCase();
+      return `<span style="color:${k==='KILL'||k==='WOUND'?'#ef4444':'var(--dim)'}; font-size:10px">${v.number} ${label}</span>`;
+    });
+    countsHtml = `<div style="margin-bottom:6px">${cs.join(' · ')}</div>`;
+  }
+
+  // Persons display
+  let personsHtml = '';
+  if (s.persons?.length) {
+    personsHtml = `<div style="font-size:10px; color:var(--muted); margin-bottom:6px">👤 ${s.persons.slice(0,3).join(', ')}</div>`;
+  }
+
+  // Articles (now just URL + source, no pre-generated titles)
+  const arts=(s.articles||[]).map(a=>{
+    const displayUrl = a.url ? new URL(a.url).hostname.replace('www.','') : a.source;
+    return `<li><a href="${a.url}" target="_blank">${a.source || displayUrl}</a><div class="src">Tone: ${a.tone>0?'+':''}${a.tone}</div></li>`;
+  }).join('');
+
+  // Store hotspot data on window for Groq callback
+  window['_hs_'+pid] = s;
+
   return `
     <div class="popup-header">
       <div><div class="popup-city">${s.city}</div><div class="popup-country">${s.country}</div></div>
       <span class="popup-badge" style="background:${bc};margin-left:auto">${s.categories?.[0]||'news'}</span>
     </div>
     <div class="popup-stats">
-      <div class="popup-stat"><div class="popup-stat-val">${s.numSources}</div><div class="popup-stat-lbl">Sources</div></div>
+      <div class="popup-stat"><div class="popup-stat-val">${s.numArticles||0}</div><div class="popup-stat-lbl">Articles</div></div>
       <div class="popup-stat"><div class="popup-stat-val" style="color:${tc}">${tl}</div><div class="popup-stat-lbl">Tone</div></div>
     </div>
-    ${sum}
+    ${countsHtml}${personsHtml}
+    <div id="${pid}" class="popup-summary" style="min-height:20px"></div>
     ${arts?'<ul class="popup-articles">'+arts+'</ul>':''}`;
 }
 
@@ -289,7 +451,11 @@ function renderDots(data,filter){
     const col=getC(s.intensity,s.categories);
     const m=L.circleMarker([s.lat,s.lng],{radius:Math.max(getR(s.intensity)*.5,3),
       fillColor:col.b,fillOpacity:.65,color:col.b,weight:1,opacity:.8});
-    m.bindPopup(buildPopup(s),{maxWidth:340});
+    const popupContent = buildPopup(s);
+    m.bindPopup(popupContent,{maxWidth:340});
+    // Store hotspot data on marker for auto-summary
+    m._hotspotData = s;
+    m._popupId = popupContent.match(/id="(sum-\d+)"/)?.[1];
     ms.push(m);
   });
   cg.addLayers(ms);
@@ -318,7 +484,7 @@ function renderHeat(data,filter){
     g.stories.sort((a,b)=>b.intensity-a.intensity);
     const items=g.stories.map(s=>{
       const bc=(CC[s.categories?.[0]]||DC).b;
-      return `<li><span class="popup-badge" style="background:${bc};font-size:8px;padding:1px 5px;margin-right:3px">${s.categories?.[0]||''}</span><span style="color:var(--dim)">${s.summary||s.city}</span> <span style="color:var(--muted);font-size:9px">(${s.numSources})</span></li>`;
+      return `<li><span class="popup-badge" style="background:${bc};font-size:8px;padding:1px 5px;margin-right:3px">${s.categories?.[0]||''}</span><span style="color:var(--dim)">${s.city}</span> <span style="color:var(--muted);font-size:9px">(${s.numArticles||s.numSources||0})</span></li>`;
     }).join('');
     cm.bindPopup(`<div class="popup-header"><div><div class="popup-city">${g.stories[0]?.city||''}</div><div class="popup-country">${g.stories[0]?.country||''} — ${g.n} events</div></div></div><ul class="popup-story-list">${items}</ul>`,{maxWidth:380,maxHeight:320});
     markersLayer.addLayer(cm);
@@ -331,7 +497,7 @@ function renderHeat(data,filter){
 function updateStats(f){
   const countries=new Set(f.map(d=>d.country));
   document.getElementById('sEvents').textContent=f.length.toLocaleString();
-  document.getElementById('sSources').textContent=f.reduce((s,d)=>s+d.numSources,0).toLocaleString();
+  document.getElementById('sSources').textContent=f.reduce((s,d)=>s+(d.numArticles||d.numSources||0),0).toLocaleString();
   document.getElementById('sCountries').textContent=countries.size;
 }
 
@@ -351,7 +517,7 @@ async function loadData(){
     const r=await fetch(CONFIG.dataURL+'?t='+Date.now());
     const raw=await r.json();
     allData=(raw.hotspots||raw);
-    hotspotData=allData.filter(d=>d.numSources>=CONFIG.minSrc);
+    hotspotData=allData.filter(d=>(d.numArticles||d.numSources||0)>=CONFIG.minSrc);
   }catch(e){console.error('Load failed:',e);hotspotData=allData=[];}
   render();
   updateLB();
@@ -371,7 +537,7 @@ function updateLB(){
   const el=document.getElementById('lbList');
   if(lbMode==='continent'){
     const m={};
-    f.forEach(d=>{const c=d.continent||'Other';if(!m[c])m[c]={n:0,s:0,co:new Set()};m[c].n++;m[c].s+=d.numSources;m[c].co.add(d.country);});
+    f.forEach(d=>{const c=d.continent||'Other';if(!m[c])m[c]={n:0,s:0,co:new Set()};m[c].n++;m[c].s+=(d.numArticles||d.numSources||0);m[c].co.add(d.country);});
     const sorted=Object.entries(m).map(([k,v])=>({name:k,n:v.n,s:v.s,co:v.co.size})).sort((a,b)=>b.n-a.n);
     const mx=sorted[0]?.n||1;
     el.innerHTML=sorted.map((c,i)=>`<div class="lb-row" data-cont="${c.name}"><span class="lb-rank">${i+1}</span><span class="lb-name">${c.name}</span><span class="lb-val">${c.n.toLocaleString()}</span><div class="lb-bar-bg"><div class="lb-bar" style="width:${c.n/mx*100}%"></div></div></div>`).join('');
@@ -380,7 +546,7 @@ function updateLB(){
     }));
   } else {
     const m={};
-    f.forEach(d=>{const c=d.country||'?';if(!m[c])m[c]={n:0,s:0};m[c].n++;m[c].s+=d.numSources;});
+    f.forEach(d=>{const c=d.country||'?';if(!m[c])m[c]={n:0,s:0};m[c].n++;m[c].s+=(d.numArticles||d.numSources||0);});
     const sorted=Object.entries(m).map(([k,v])=>({name:k,n:v.n,s:v.s})).sort((a,b)=>b.n-a.n).slice(0,50);
     const mx=sorted[0]?.n||1;
     el.innerHTML=sorted.map((c,i)=>`<div class="lb-row" data-country="${c.name}"><span class="lb-rank">${i+1}</span><span class="lb-name">${c.name}</span><span class="lb-val">${c.n.toLocaleString()}</span><div class="lb-bar-bg"><div class="lb-bar" style="width:${c.n/mx*100}%"></div></div></div>`).join('');
@@ -414,7 +580,7 @@ document.getElementById('viewBtn').addEventListener('click',()=>{
 // Source slider
 document.getElementById('srcSlider').addEventListener('input',e=>{
   const v=parseInt(e.target.value);document.getElementById('srcVal').textContent=v;
-  CONFIG.minSrc=v;hotspotData=allData.filter(d=>d.numSources>=v);render();updateLB();
+  CONFIG.minSrc=v;hotspotData=allData.filter(d=>(d.numArticles||d.numSources||0)>=v);render();updateLB();
 });
 // Leaderboard tabs
 document.querySelectorAll('.lb-tab').forEach(t=>{
