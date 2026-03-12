@@ -105,6 +105,7 @@ def format_output(hotspots, timestamp):
             "eventCount": h.get("eventCount", 1),
             "hoursAgo": h.get("hoursAgo"),
             "summary": h.get("summary", ""),
+            "notableNames": h.get("notable_names", []),
             "articles": articles,
         })
     return output
