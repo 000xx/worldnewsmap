@@ -41,10 +41,10 @@ jobs:
           cd pipeline
           python orchestrator.py
 
-      - name: Inject Groq API key into frontend
+      - name: Inject Groq proxy URL into frontend
         run: |
-          # Replace placeholder in index.html with the actual key
-          sed -i "s|__GROQ_API_KEY__|${{ secrets.GROQ_API_KEY }}|g" index.html
+          # Replace placeholder with Cloudflare Worker URL (public, safe to commit)
+          sed -i "s|__GROQ_PROXY_URL__|${{ vars.GROQ_PROXY_URL }}|g" index.html
 
       - name: Commit and push updated data
         run: |
