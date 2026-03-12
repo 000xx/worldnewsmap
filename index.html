@@ -229,7 +229,7 @@
 // CONFIG & STATE
 // ═══════════════════════════════════════════
 const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:1 };
-const GROQ_PROXY_URL = '__GROQ_PROXY_URL__'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
+const GROQ_PROXY_URL = 'https://still-leaf-983b.milo-borek.workers.dev'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const CC = {
   conflict:{b:'#ef4444',g:'rgba(239,68,68,.35)'},
@@ -320,7 +320,7 @@ async function groqSummarize(popupId, hotspot) {
   }
 
   // No proxy configured
-  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') {
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === 'https://still-leaf-983b.milo-borek.workers.dev') {
     el.textContent = '';
     el.className = 'popup-summary';
     return;
