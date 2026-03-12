@@ -28,7 +28,6 @@ jobs:
           NEWSMAP_MAX_AGE_HOURS: '36'
           NEWSMAP_NUM_DAYS: '3'
           NEWSMAP_OUTPUT: '../data/live.json'
-          NEWSMAP_API_DELAY: '0.5'
         run: |
           cd pipeline
           python orchestrator.py
