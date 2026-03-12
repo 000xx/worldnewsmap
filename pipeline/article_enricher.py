@@ -34,7 +34,7 @@ def fetch_doc_api(query, max_records=5, timespan="3d"):
 
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "WorldNewsMap/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # 5s timeout, not 15
             data = json.loads(resp.read().decode("utf-8"))
 
         articles = []
@@ -101,14 +101,21 @@ def pick_best_title(articles):
     return scored[0][1]["title"] if scored else None
 
 
-def enrich(hotspots, delay=0.3):
+def enrich(hotspots, delay=0.3, max_minutes=5):
     """
     Enrich hotspots with real headlines via GDELT DOC 2.0 API.
 
     Groups by (country, category) — so all politics events in Kenya share
     one query. This covers ALL events with ~200-400 API calls (~2-3 min).
+
+    Hard time limit of max_minutes prevents runaway execution.
     """
+    import time as _time
+    start = _time.time()
+    deadline = start + max_minutes * 60
+
     print("[Article Enricher — GDELT DOC API]")
+    print(f"  Time budget: {max_minutes} minutes")
 
     # Step 1: Group by country + primary category
     groups = defaultdict(list)
@@ -126,24 +133,25 @@ def enrich(hotspots, delay=0.3):
         reverse=True,
     )
 
-    # Step 3: Query DOC API for each group
+    # Step 3: Query DOC API for each group (with time budget)
     enriched_groups = 0
     enriched_events = 0
     failed = 0
+    timed_out = False
 
     for idx, ((country, cat), indices) in enumerate(sorted_groups):
-        # Build query: country name + category keywords
-        cat_kw = CAT_KEYWORDS.get(cat, "news")
-        query = f"{country} {cat_kw}"
+        # Check time budget
+        if _time.time() > deadline:
+            timed_out = True
+            print(f"    ⏱ Time budget reached at group {idx}/{len(sorted_groups)}")
+            break
 
-        # If the group has high-value actors, add the best one
+        # Build query from best event in group
         best_idx = max(indices, key=lambda i: hotspots[i].get("intensity", 0))
-        search_q = hotspots[best_idx].get("searchQuery", "")
-        # Extract any actor name from the pre-built search query
-        if search_q:
-            # Use the pre-built query if it's good (it includes city + actors + keyword)
-            query = search_q
-
+        query = hotspots[best_idx].get("searchQuery", "")
+        if not query:
+            cat_kw = CAT_KEYWORDS.get(cat, "news")
+            query = f"{country} {cat_kw}"
         if len(query.strip()) < 3:
             continue
 
@@ -155,12 +163,10 @@ def enrich(hotspots, delay=0.3):
                 {"title": a["title"], "url": a["url"], "source": a["source"], "lang": a.get("lang", "en")}
                 for a in articles[:5]
             ]
-
             for i in indices:
                 hotspots[i]["articles"] = article_list
                 if best_title:
                     hotspots[i]["summary"] = best_title
-
             enriched_groups += 1
             enriched_events += len(indices)
         else:
@@ -168,14 +174,14 @@ def enrich(hotspots, delay=0.3):
 
         # Progress every 50
         if (idx + 1) % 50 == 0:
+            elapsed = _time.time() - start
             print(f"    Progress: {idx + 1}/{len(sorted_groups)} groups "
-                  f"({enriched_events:,} events enriched, {failed} no results)")
+                  f"({enriched_events:,} events, {failed} failed, {elapsed:.0f}s elapsed)")
 
-        # Rate limit
         if delay > 0:
             sleep(delay)
 
-    # Fallback: unenriched events get source URL as article link
+    # Fallback for unenriched events
     for h in hotspots:
         if "articles" not in h or not h["articles"]:
             articles = []
@@ -187,9 +193,13 @@ def enrich(hotspots, delay=0.3):
                 articles.append({"title": "Read full report", "url": url, "source": domain, "lang": "en"})
             h["articles"] = articles
 
-    print(f"  ✓ Enriched {enriched_groups:,} groups ({enriched_events:,} events with real headlines)")
+    elapsed = _time.time() - start
+    print(f"  ✓ Enriched {enriched_groups:,} groups ({enriched_events:,} events) in {elapsed:.0f}s")
     if failed:
         print(f"    {failed:,} groups returned no results")
+    if timed_out:
+        remaining = len(sorted_groups) - idx
+        print(f"    {remaining:,} groups skipped (time budget, kept template summaries)")
 
     return hotspots
 
