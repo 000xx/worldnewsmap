@@ -116,17 +116,24 @@ def build_gkg_query(since_timestamp, until_timestamp=None):
 
 def parse_locations(v2locations):
     """
-    Parse V2Locations field.
-    Format: TYPE#FULLNAME#COUNTRYCODE#ADM1CODE#LAT#LONG#FEATUREID;...
+    Parse V2Locations (V2EnhancedLocations) field.
 
+    V2Enhanced format (GKG 2.1+):
+      TYPE#FULLNAME#COUNTRYCODE#ADM1CODE#ADM2CODE#LAT#LONG#FEATUREID#CHAROFFSET
+      [0]   [1]       [2]        [3]      [4]    [5] [6]    [7]        [8]
+
+    Note: V2 added ADM2CODE at index 4, shifting LAT to 5 and LONG to 6.
     Each location is semicolon-delimited, fields are #-delimited.
-    We only want city-level or better (type 3, 4, 5).
+    We only want city-level or better (type 3, 4).
     """
     if not v2locations:
         return []
 
     locations = []
     for loc_str in v2locations.split(";"):
+        loc_str = loc_str.strip()
+        if not loc_str:
+            continue
         parts = loc_str.split("#")
         if len(parts) < 7:
             continue
@@ -142,10 +149,25 @@ def parse_locations(v2locations):
 
         fullname = parts[1].strip()
         country_code = parts[2].strip()
-        lat = _safe_float(parts[4])
-        lng = _safe_float(parts[5])
+
+        # Detect V2Enhanced (has ADM2CODE) vs V1 format
+        # V2Enhanced has 9 fields, V1 has 7
+        # Safe detection: if there are 8+ parts, it's V2Enhanced
+        if len(parts) >= 9:
+            # V2Enhanced: TYPE#FULLNAME#CC#ADM1#ADM2#LAT#LONG#FEATUREID#OFFSET
+            lat = _safe_float(parts[5])
+            lng = _safe_float(parts[6])
+        elif len(parts) >= 7:
+            # V1: TYPE#FULLNAME#CC#ADM1#LAT#LONG#FEATUREID
+            lat = _safe_float(parts[4])
+            lng = _safe_float(parts[5])
+        else:
+            continue
 
         if lat == 0.0 and lng == 0.0:
+            continue
+        # Sanity check lat/lng ranges
+        if lat < -90 or lat > 90 or lng < -180 or lng > 180:
             continue
 
         # Parse city and country from fullname
@@ -635,7 +657,7 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
 
 # ── State Management (for incremental mode) ──────────────────────
 
-STATE_FILE = "../data/collector_state.json"
+STATE_FILE = "data/collector_state.json"
 
 
 def load_state():
