@@ -340,61 +340,294 @@ def parse_tone(v2tone):
 
 
 # ── Category Classification ──────────────────────────────────────
+# Three-layer system: (1) theme prefix matching, (2) counts override, (3) positive detection
 
-THEME_TO_CATEGORY = {
-    # Conflict
-    "KILL": "conflict", "WOUND": "conflict", "TERROR": "conflict",
-    "MILITARY": "conflict", "ARMED_CONFLICT": "conflict", "WAR": "conflict",
-    "ARMEDCONFLICT": "conflict", "ARREST": "conflict",
-    "PROTEST": "conflict", "REBELLION": "conflict", "COUP": "conflict",
-    # Politics
-    "ELECTION": "politics", "LEGISLATION": "politics", "GOVERN": "politics",
-    "ECON_TAXATION": "politics", "DIPLOMACY": "politics", "PARLIAMENT": "politics",
-    "LEADER": "politics", "DEMOCRACY": "politics",
-    "GENERAL_GOVERNMENT": "politics", "POLITICAL_TURMOIL": "politics",
-    # Economy
-    "ECON_": "economy", "TRADE": "economy", "MARKET": "economy",
-    "INFLATION": "economy", "UNEMPLOYMENT": "economy", "BANKRUPTCY": "economy",
-    "FINANCE": "economy", "SANCTIONS": "economy",
-    # Environment
-    "ENV_": "environment", "CLIMATE": "environment", "FLOOD": "environment",
-    "DROUGHT": "environment", "EARTHQUAKE": "environment", "HURRICANE": "environment",
-    "WILDFIRE": "environment", "TSUNAMI": "environment",
-    "NATURAL_DISASTER": "environment",
-    # Humanitarian
-    "REFUGEE": "humanitarian", "FAMINE": "humanitarian", "DISPLACED": "humanitarian",
-    "HUMANITARIAN": "humanitarian", "FOOD_SECURITY": "humanitarian",
-    "POVERTY": "humanitarian",
-    # Health
-    "HEALTH_": "health", "PANDEMIC": "health", "DISEASE": "health",
-    "MEDICAL": "health", "VACCINE": "health", "EPIDEMIC": "health",
-    # Positive
-    "PEACE": "positive", "CEASEFIRE": "positive", "COOPERATION": "positive",
-    "ACHIEVEMENT": "positive", "BREAKTHROUGH": "positive",
+# Layer 1: Comprehensive GKG theme prefix → category mapping
+# Organized by category, each prefix is checked with startswith() or contains()
+THEME_PREFIXES = {
+    # ── CONFLICT ──
+    "conflict": [
+        "ARMEDCONFLICT", "ARMED_CONFLICT", "MILITARY", "WAR", "TERROR",
+        "INSURGENCY", "REBELLION", "COUP", "ASSASSINATION", "BOMB",
+        "MASSACRE", "SIEGE", "HOSTAGE", "SNIPER", "AMBUSH", "SHELLING",
+        "AIRSTRIKE", "DRONE_STRIKE", "LANDMINE", "ARTILLERY",
+        "CRISISLEX_T01", "CRISISLEX_T02", "CRISISLEX_T03",  # crisis lexicon (casualties)
+        "CRISISLEX_C01", "CRISISLEX_C02",  # crisis infrastructure
+        "WEAPONS", "WMD", "NUCLEAR_WEAPON", "CHEMICAL_WEAPON",
+        "BIOLOGICAL_WEAPON", "ARMS_DEAL", "ARMS_TRADE",
+        "VIOLENT", "VIOLENCE", "GENOCIDE", "ETHNIC_CLEANSING",
+        "PIRACY", "GANG", "CARTEL", "ORGANIZED_CRIME",
+        "CYBER_ATTACK", "CYBERATTACK",
+    ],
+    # ── POLITICS ──
+    "politics": [
+        "ELECTION", "LEGISLATION", "LEGISLAT", "PARLIAMENT", "CONGRESS",
+        "GOVERN", "GOVERNMENT", "DIPLOMACY", "DIPLOMATIC",
+        "DEMOCRACY", "DEMOCRAT", "REPUBLICAN", "POLITICAL",
+        "LEADER", "PRESIDENT", "PRIME_MINISTER", "CHANCELLOR",
+        "REFERENDUM", "CONSTITUTION", "IMPEACH",
+        "CORRUPTION", "SCANDAL", "CENSORSHIP",
+        "PROTEST", "DEMONSTRATION", "RALLY", "STRIKE",
+        "SANCTIONS", "EMBARGO", "TRADE_WAR",
+        "INTELLIGENCE_SERVICE", "ESPIONAGE", "SURVEILLANCE",
+        "TAX_FNCACT", "TAX_ETHNICITY", "TAX_POLITICAL",
+        "SOC_POINTSOFINTEREST", "SOC_GENERAL",
+        "GENERAL_GOVERNMENT", "POLITICAL_TURMOIL",
+        "IMMIGRATION", "MIGRATION_POLICY", "BORDER",
+        "EPU_POLICY", "EPU_ECONOMY_POLICY",
+        "ARREST", "TRIAL", "COURT", "JUDICIARY", "PROSECUTION",
+        "LAW_ENFORCEMENT", "POLICE",
+    ],
+    # ── ECONOMY ──
+    "economy": [
+        "ECON_", "ECONOMY", "ECONOMIC",
+        "TRADE", "MARKET", "STOCK", "SHARES",
+        "INFLATION", "DEFLATION", "RECESSION",
+        "UNEMPLOYMENT", "EMPLOYMENT", "JOBS",
+        "BANKRUPTCY", "INSOLVENCY", "DEBT",
+        "FINANCE", "BANKING", "CENTRAL_BANK", "INTEREST_RATE",
+        "GDP", "GROWTH", "INVESTMENT",
+        "CURRENCY", "EXCHANGE_RATE", "CRYPTO",
+        "OIL_PRICE", "COMMODITY", "ENERGY_PRICE",
+        "REAL_ESTATE", "HOUSING", "MORTGAGE",
+        "MANUFACTURING", "INDUSTRY", "SUPPLY_CHAIN",
+        "WB_466_FISCAL", "WB_469_DEBT", "WB_470_PUBLIC",
+        "WB_475_TRADE", "WB_489_PRIVATE_SECTOR",
+        "WB_621_MACROECONOMIC", "WB_2024_FOOD_PRICE",
+    ],
+    # ── ENVIRONMENT ──
+    "environment": [
+        "ENV_", "ENVIRONMENT", "CLIMATE",
+        "FLOOD", "DROUGHT", "EARTHQUAKE", "HURRICANE", "TYPHOON",
+        "CYCLONE", "TORNADO", "TSUNAMI", "WILDFIRE", "BUSHFIRE",
+        "VOLCANIC", "ERUPTION", "AVALANCHE", "LANDSLIDE", "MUDSLIDE",
+        "NATURAL_DISASTER", "DISASTER", "STORM", "BLIZZARD", "HEATWAVE",
+        "DEFORESTATION", "POLLUTION", "EMISSION",
+        "WATER_SECURITY", "WATER_POLLU", "AIR_QUALITY",
+        "BIODIVERSITY", "SPECIES", "WILDLIFE", "CONSERVATION",
+        "OCEAN", "MARINE", "CORAL", "ARCTIC", "GLACIER", "SEA_LEVEL",
+        "RENEWABLE", "SOLAR", "WIND_ENERGY", "GREEN_ENERGY",
+        "CARBON", "GREENHOUSE", "SUSTAINABILITY",
+        "WB_2565_ENVIRONMENT", "WB_2566_CLIMATE",
+    ],
+    # ── HUMANITARIAN ──
+    "humanitarian": [
+        "HUMANITARIAN", "REFUGEE", "DISPLACED", "DISPLACEMENT",
+        "FAMINE", "HUNGER", "STARVATION", "MALNUTRITION",
+        "FOOD_SECURITY", "FOOD_AID", "AID_DELIVERY",
+        "POVERTY", "EXTREME_POVERTY", "HOMELESSNESS",
+        "CHILD_LABOR", "HUMAN_TRAFFICKING", "SLAVERY",
+        "WATER_CRISIS", "SANITATION",
+        "RED_CROSS", "UNICEF", "UNHCR", "WFP",
+        "DISASTER_RELIEF", "EMERGENCY_AID", "RESCUE",
+        "WB_2562_POVERTY", "WB_2024_FOOD_SECURITY",
+        "WB_696_SOCIAL_PROTECT", "WB_2166_SOCIAL_INCLUSION",
+        "CRISISLEX_T04", "CRISISLEX_C03", "CRISISLEX_C04",  # crisis displacement/aid
+    ],
+    # ── HEALTH ──
+    "health": [
+        "HEALTH", "MEDICAL", "DISEASE", "PANDEMIC", "EPIDEMIC",
+        "VACCINE", "VACCINATION", "IMMUNIZ",
+        "HOSPITAL", "DOCTOR", "NURSE", "SURGEON",
+        "CANCER", "HIV", "AIDS", "MALARIA", "TUBERCULOSIS", "EBOLA",
+        "COVID", "CORONAVIRUS", "INFLUENZA", "FLU",
+        "MENTAL_HEALTH", "DEPRESSION", "SUICIDE",
+        "DRUG", "PHARMACEUTICAL", "FDA",
+        "INFANT_MORTALITY", "MATERNAL", "CHILDBIRTH",
+        "WHO", "CDC",
+        "WB_830_HEALTH", "WB_831_NUTRITION",
+        "DIET", "OBESITY", "FITNESS",
+    ],
+    # ── SCIENCE & TECH ──
+    "science_tech": [
+        "SCIENCE", "RESEARCH", "DISCOVERY",
+        "TECHNOLOGY", "TECH_", "DIGITAL",
+        "ARTIFICIAL_INTELLIGENCE", "AI_", "MACHINE_LEARNING",
+        "CYBER", "CYBERSECURITY", "HACKING",
+        "SPACE", "NASA", "SATELLITE", "ROCKET", "MARS", "MOON",
+        "ROBOT", "AUTOMAT", "AUTONOMOUS",
+        "BIOTECH", "GENETIC", "GENOME", "DNA",
+        "QUANTUM", "NANOTECHNOLOGY",
+        "INTERNET", "SOCIAL_MEDIA", "PLATFORM",
+        "ELECTRIC_VEHICLE", "BATTERY", "SEMICONDUCTOR",
+        "STARTUP", "INNOVATION",
+        "WB_2244_SCIENCE", "WB_2245_TECHNOLOGY",
+        "WB_2246_INNOVATION", "WB_2247_INFORMATION",
+    ],
 }
 
+# Layer 3: Positive theme signals (genuine good news, not just positive tone)
+POSITIVE_THEMES = [
+    # Peace & resolution
+    "PEACE", "CEASEFIRE", "PEACE_PROCESS", "PEACE_TALK", "PEACE_AGREEMENT",
+    "TRUCE", "ARMISTICE", "RECONCILIATION", "DEMOBILIZATION",
+    "DIPLOMATIC_COOPERATION", "COOPERATION",
+    # Humanitarian success
+    "AID_DELIVERY", "RESCUE", "RELIEF", "RECOVERY",
+    "RESETTLEMENT", "REPATRIATION",
+    # Health wins
+    "VACCINE", "CURE", "MEDICAL_BREAKTHROUGH", "TREATMENT",
+    "HEALTH_RECOVERY", "SURVIVOR",
+    # Environmental wins
+    "CONSERVATION", "SPECIES_PROTECT", "RENEWABLE",
+    "REFORESTATION", "RESTORATION", "CLEAN_ENERGY",
+    # Social progress
+    "EDUCATION", "LITERACY", "SCHOLARSHIP",
+    "EQUALITY", "INCLUSION", "RIGHTS",
+    "GRADUATION", "ACHIEVEMENT",
+    # Community & culture
+    "VOLUNTEER", "CHARITY", "DONATION", "FUNDRAIS",
+    "COMMUNITY", "FESTIVAL", "CELEBRATION", "CULTURE",
+    "HERITAGE", "MUSEUM", "LIBRARY",
+    # Economic uplift
+    "ECON_RECOVERY", "ECON_GROWTH", "POVERTY_REDUCTION",
+    "JOB_CREATION", "ENTREPRENEURSHIP", "SMALL_BUSINESS",
+]
 
-def classify_themes(themes, tone=0.0):
-    """Classify a list of GKG themes into our category system."""
-    category_scores = defaultdict(int)
+# Headline keywords that signal positive stories (checked against raw headlines)
+POSITIVE_HEADLINE_WORDS = {
+    "rescued", "saved", "wins", "celebrates", "honors", "honoured", "awarded",
+    "donates", "volunteers", "graduates", "survives", "survived", "reunited",
+    "adopts", "achieves", "achievement", "record-breaking", "milestone",
+    "hero", "heroic", "inspires", "inspiring", "comeback", "recovery",
+    "breakthrough", "cured", "freed", "released", "restored", "approved",
+    "protected", "progress", "success", "successful", "victory", "peace",
+    "ceasefire", "agreement", "deal", "partnership", "inaugurated", "opened",
+    "launched", "discovered", "advances", "improves", "improved", "grows",
+    "growing", "thriving", "prosper", "bloom", "flourish",
+}
 
+# Themes that BLOCK positive classification (even if tone is high)
+CONFLICT_BLOCK_THEMES = [
+    "KILL", "WOUND", "TERROR", "WAR", "ARMED_CONFLICT", "MASSACRE",
+    "BOMB", "ATTACK", "ASSAULT", "VIOLENCE", "GENOCIDE", "CRISISLEX_T03",
+]
+
+
+def classify_event(themes, counts, tone, headlines, num_sources):
+    """
+    Classify an event into categories using three layers:
+      1. Theme prefix matching (primary signal)
+      2. Counts-based override (hard signal)
+      3. Positive detection (overlay)
+
+    Returns list of categories, primary first.
+    """
+    category_scores = defaultdict(float)
+
+    # ── Layer 1: Theme prefix matching ──
     for theme in themes:
-        theme_upper = theme.upper()
-        for pattern, cat in THEME_TO_CATEGORY.items():
-            if pattern in theme_upper:
-                category_scores[cat] += 1
+        theme_upper = theme.upper().strip()
+        if not theme_upper:
+            continue
+        matched = False
+        for cat, prefixes in THEME_PREFIXES.items():
+            for prefix in prefixes:
+                if prefix in theme_upper or theme_upper.startswith(prefix):
+                    category_scores[cat] += 1
+                    matched = True
+                    break
+            if matched:
                 break
 
-    # Positive tone override
-    if tone > 5.0:
-        category_scores["positive"] = max(category_scores.get("positive", 0), 3)
+    # ── Layer 2: Counts-based overrides ──
+    kill_count = counts.get("KILL", {}).get("number", 0)
+    wound_count = counts.get("WOUND", {}).get("number", 0)
+    protest_count = counts.get("PROTEST", {}).get("number", 0)
+    arrest_count = counts.get("ARREST", {}).get("number", 0)
+    affect_count = counts.get("AFFECT", {}).get("number", 0)
 
+    if kill_count > 0 or wound_count > 0:
+        category_scores["conflict"] += 5  # Strong override
+    if protest_count > 0:
+        category_scores["politics"] += 3
+    if affect_count > 100:
+        category_scores["humanitarian"] += 3
+
+    # ── Layer 3: Positive detection ──
+    is_positive = False
+    has_conflict_block = False
+
+    # Check for conflict blockers
+    for theme in themes:
+        theme_upper = theme.upper()
+        for block in CONFLICT_BLOCK_THEMES:
+            if block in theme_upper:
+                has_conflict_block = True
+                break
+        if has_conflict_block:
+            break
+
+    if kill_count > 0 or wound_count > 0:
+        has_conflict_block = True
+
+    if not has_conflict_block:
+        # Rule 1: Strong positive theme match
+        pos_theme_hits = 0
+        for theme in themes:
+            theme_upper = theme.upper()
+            for pt in POSITIVE_THEMES:
+                if pt in theme_upper:
+                    pos_theme_hits += 1
+                    break
+        if pos_theme_hits >= 2 and tone > 2.0:
+            is_positive = True
+
+        # Rule 2: Headline keyword match
+        if not is_positive and headlines:
+            pos_word_hits = 0
+            for hl in headlines:
+                hl_lower = hl.lower()
+                for pw in POSITIVE_HEADLINE_WORDS:
+                    if pw in hl_lower:
+                        pos_word_hits += 1
+                        break
+            if pos_word_hits >= 1 and tone > 3.0:
+                is_positive = True
+
+        # Rule 3: Local feel-good pattern (high tone + low sources + no violence)
+        if not is_positive:
+            if (tone > 5.0
+                and num_sources <= 3
+                and arrest_count == 0
+                and not has_conflict_block):
+                is_positive = True
+
+        # Rule 4: Peace/resolution (global scale positive)
+        if not is_positive:
+            for theme in themes:
+                theme_upper = theme.upper()
+                if any(p in theme_upper for p in ["PEACE", "CEASEFIRE", "COOPERATION"]):
+                    if tone > 0:
+                        is_positive = True
+                        break
+
+    # Build final category list
     if not category_scores:
-        category_scores["politics"] = 1
+        category_scores["politics"] = 1  # Default fallback
 
-    # Sort by score, return as list
     sorted_cats = sorted(category_scores.items(), key=lambda x: -x[1])
-    return [cat for cat, _ in sorted_cats]
+    result = [cat for cat, _ in sorted_cats]
+
+    # Add positive as overlay (or promote to primary if no strong other signal)
+    if is_positive:
+        if "positive" in result:
+            result.remove("positive")
+        if sorted_cats and sorted_cats[0][1] <= 2:
+            # Weak primary signal — positive becomes primary
+            result.insert(0, "positive")
+        else:
+            # Strong primary — positive is secondary overlay
+            if "positive" not in result:
+                result.insert(1, "positive")
+
+    return result
+
+
+# Legacy wrapper for backward compatibility
+def classify_themes(themes, tone=0.0):
+    """Wrapper that calls classify_event with minimal args."""
+    return classify_event(themes, {}, tone, [], 1)
 
 
 # ── Spatial Grouping ─────────────────────────────────────────────
@@ -685,8 +918,14 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
             if theme and theme not in themes_raw:
                 themes_raw.append(theme)
 
-        # Classify categories
-        categories = classify_themes(themes_raw[:50], tone=avg_tone)
+        # Classify categories using all available signals
+        categories = classify_event(
+            themes_raw[:50],
+            count_agg,
+            avg_tone,
+            all_headlines,
+            sum(len(ev.get("sources", [])) for ev in events) if events else 1,
+        )
 
         # Parse counts
         count_agg = {}
