@@ -134,7 +134,7 @@ def build_gkg_query(since_timestamp, until_timestamp=None):
     gridded AS (
       SELECT
         *,
-        -- 0.5 degree grid cell (~55km)
+        -- 0.5 degree grid cell for grouping only
         ROUND(lat * 2) / 2 AS grid_lat,
         ROUND(lng * 2) / 2 AS grid_lng
       FROM filtered
@@ -142,7 +142,10 @@ def build_gkg_query(since_timestamp, until_timestamp=None):
     SELECT
       grid_lat,
       grid_lng,
-      -- Representative location: most common fullname in cell
+      -- Real coordinates of the most-cited location in this cell
+      APPROX_TOP_COUNT(lat, 1)[OFFSET(0)].value AS real_lat,
+      APPROX_TOP_COUNT(lng, 1)[OFFSET(0)].value AS real_lng,
+      -- Representative location name
       APPROX_TOP_COUNT(fullname, 1)[OFFSET(0)].value AS top_fullname,
       APPROX_TOP_COUNT(country_code, 1)[OFFSET(0)].value AS top_country_code,
       COUNT(*) AS num_articles,
@@ -626,8 +629,9 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
     total_events = 0
 
     for row in rows:
-        lat = row.grid_lat
-        lng = row.grid_lng
+        # Use real coordinates of the most-cited location, not grid center
+        lat = row.real_lat if row.real_lat is not None else row.grid_lat
+        lng = row.real_lng if row.real_lng is not None else row.grid_lng
         num_articles = row.num_articles
         avg_tone = row.avg_tone or 0.0
 
