@@ -93,6 +93,18 @@
   .popup-sources a:hover { color:#60a5fa; }
   .popup-sources .src-arrow { color:var(--muted); font-size:9px; float:right; margin-top:2px; }
   .popup-meta { font-size:9px; color:var(--muted); margin-top:6px; }
+
+  /* Event cards — scrollable list of events per location */
+  .events-list { max-height:320px; overflow-y:auto; }
+  .event-card { padding:8px 0; border-bottom:1px solid var(--border); }
+  .event-card:last-child { border-bottom:none; }
+  .event-headline { font-size:12.5px; font-weight:600; line-height:1.35; color:var(--text); margin-bottom:5px; }
+  .event-headline.loading { color:var(--muted); font-style:italic; font-weight:400; }
+  .event-sources { display:flex; flex-wrap:wrap; gap:4px 10px; }
+  .event-sources a { color:var(--accent); text-decoration:none; font-size:10px; font-weight:500; transition:color .15s; }
+  .event-sources a:hover { color:#60a5fa; }
+  .event-sources .src-arrow { color:var(--muted); font-size:8px; margin-left:2px; }
+  .event-meta { font-size:9px; color:var(--muted); margin-top:3px; }
   /* Story list popup (heatmap mode) */
   .popup-story-list { list-style:none; max-height:260px; overflow-y:auto; }
   .popup-story-list li { padding:5px 0; border-bottom:1px solid rgba(30,45,69,.4); font-size:11px; line-height:1.35; }
@@ -255,14 +267,24 @@ function initMap(){
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19}).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
 
-  // Auto-fire Groq headline when any popup opens
+  // Auto-fire Groq headlines for each event when popup opens
   map.on('popupopen', function(e) {
     const marker = e.popup._source;
-    if (marker && marker._hotspotData && marker._popupId !== undefined) {
+    if (marker && marker._hotspotData) {
+      const s = marker._hotspotData;
       const pid = marker._popupId;
-      const hs = marker._hotspotData;
-      window['_hs_' + pid] = hs;
-      setTimeout(() => groqHeadline(pid, hs), 50);
+      const events = s.events || [];
+      events.forEach((ev, i) => {
+        const evId = `ev-${pid}-${i}`;
+        const el = document.getElementById('hl-' + evId);
+        // Only fire Groq if the headline element is in loading state (no pre-existing headline)
+        if (el && el.classList.contains('loading')) {
+          const evData = window['_ev_' + evId];
+          if (evData) {
+            setTimeout(() => groqHeadline(evId, evData), 50 + i * 100);
+          }
+        }
+      });
     }
   });
 }
@@ -303,7 +325,9 @@ function buildGroqContext(hs) {
   }
   if (m.categories?.length || hs.categories?.length) parts.push(`Categories: ${(hs.categories||m.categories||[]).join(', ')}`);
   if (m.avgTone) parts.push(`Average media tone: ${m.avgTone}`);
-  if (hs.articles?.length) parts.push(`${hs.articles.length} sources: ${hs.articles.map(a=>a.source).filter(Boolean).join(', ')}`);
+  // Handle both old (articles) and new (sources) format
+  const srcList = hs.sources || hs.articles || [];
+  if (srcList.length) parts.push(`${srcList.length} sources: ${srcList.map(a=>a.source).filter(Boolean).join(', ')}`);
   return parts.join('\n');
 }
 
@@ -334,16 +358,16 @@ async function groqCall(messages, maxTokens=60) {
 async function groqHeadline(pid, hs) {
   const el = document.getElementById('hl-' + pid);
   if (!el) return;
-  const cacheKey = `hl:${hs.lat},${hs.lng},${(hs.headlines||[])[0]||''}`;
-  if (headlineCache[cacheKey]) { el.textContent = headlineCache[cacheKey]; el.className='popup-headline'; return; }
+  const cacheKey = `hl:${hs.city||''},${(hs.headlines||[])[0]||pid}`;
+  if (headlineCache[cacheKey]) { el.textContent = headlineCache[cacheKey]; el.className='event-headline'; return; }
   if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') {
     el.textContent = hs.headlines?.[0] || '';
-    el.className = 'popup-headline';
+    el.className = 'event-headline';
     return;
   }
 
   el.innerHTML = '<span class="hl-loading">Generating headline</span>';
-  el.className = 'popup-headline loading';
+  el.className = 'event-headline loading';
   try {
     const result = await groqCall([
       { role: 'system', content: HEADLINE_SYSTEM },
@@ -351,16 +375,16 @@ async function groqHeadline(pid, hs) {
     ], 60);
     if (result === 'RATE_LIMITED') {
       el.textContent = hs.headlines?.[0] || 'Rate limited';
-      el.className = 'popup-headline';
+      el.className = 'event-headline';
       return;
     }
     const headline = result || hs.headlines?.[0] || '';
     headlineCache[cacheKey] = headline;
     el.textContent = headline;
-    el.className = 'popup-headline';
+    el.className = 'event-headline';
   } catch(e) {
     el.textContent = hs.headlines?.[0] || '';
-    el.className = 'popup-headline';
+    el.className = 'event-headline';
   }
 }
 
@@ -389,31 +413,60 @@ async function groqSummary(pid, hs) {
 }
 
 // ═══════════════════════════════════════════
-// POPUP BUILDER
+// POPUP BUILDER — shows events list per location
 // ═══════════════════════════════════════════
 let popupCounter = 0;
 function buildPopup(s){
   const bc=(CC[s.categories?.[0]]||DC).b;
   const pid = popupCounter++;
-
-  // Source links
-  const sources = (s.articles||[]).map(a =>
-    `<li><a href="${a.url}" target="_blank">${a.source||'Source'}</a><span class="src-arrow">→</span></li>`
-  ).join('');
-
-  const nSrc = (s.articles||[]).length;
+  const events = s.events || [];
+  const nEvents = events.length;
+  const nSrc = s.numSources || 0;
 
   // Store ref for Groq callbacks
   window['_hs_'+pid] = s;
+
+  // Build event cards
+  let eventsHtml = '';
+  events.forEach((ev, i) => {
+    const evId = `ev-${pid}-${i}`;
+    const hl = (ev.headlines||[])[0] || '';
+    const srcLinks = (ev.sources||[]).map(a =>
+      `<a href="${a.url}" target="_blank">${a.source||'Source'} <span class="src-arrow">→</span></a>`
+    ).join('');
+    const nSrc = (ev.sources||[]).length;
+
+    // Store event data for Groq
+    window['_ev_'+evId] = {
+      city: s.city, country: s.country,
+      categories: s.categories,
+      headlines: ev.headlines || [],
+      metadata: s.metadata || {},
+      sources: ev.sources || [],
+    };
+
+    eventsHtml += `
+      <div class="event-card">
+        <div id="hl-${evId}" class="event-headline${hl?'':' loading'}">
+          ${hl || '<span class="hl-loading">Generating headline</span>'}
+        </div>
+        <div class="event-sources">${srcLinks}</div>
+        <div class="event-meta">${nSrc} source${nSrc!==1?'s':''}</div>
+      </div>`;
+  });
+
+  // Fallback if no events
+  if (!eventsHtml) {
+    eventsHtml = '<div class="event-card"><div class="event-headline" style="color:var(--muted)">No events found</div></div>';
+  }
 
   return `
     <div class="popup-header">
       <div><div class="popup-city">${s.city}</div><div class="popup-country">${s.country}</div></div>
       <span class="popup-badge" style="background:${bc};margin-left:auto">${s.categories?.[0]||'news'}</span>
     </div>
-    <div id="hl-${pid}" class="popup-headline loading"><span class="hl-loading">Generating headline</span></div>
-    ${sources?`<ul class="popup-sources">${sources}</ul>`:''}
-    <div class="popup-meta">${nSrc} source${nSrc!==1?'s':''}</div>`;
+    <div class="events-list">${eventsHtml}</div>
+    <div class="popup-meta">${nEvents} event${nEvents!==1?'s':''} · ${nSrc} source${nSrc!==1?'s':''}</div>`;
 }
 
 // ═══════════════════════════════════════════
