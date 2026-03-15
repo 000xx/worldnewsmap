@@ -598,10 +598,11 @@ def cluster_articles_by_event(articles, headlines):
 
 def collect_from_bigquery(since_hours=36, until_timestamp=None):
     """
-    Pull pre-aggregated GKG hotspots from BigQuery, then cluster by event.
+    Pull pre-aggregated GKG data from BigQuery, cluster into events per location.
 
-    Each grid cell's articles get sub-clustered by headline similarity.
-    Each cluster becomes its own hotspot (event) on the map.
+    Output: one hotspot per grid cell, each with an `events` array.
+    Each event has its own headlines and source-matched articles.
+    The popup shows all events at a location as a scrollable list.
     """
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=since_hours)
@@ -635,17 +636,16 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
         if is_country_centroid(lat, lng):
             continue
 
-        # Parse fullname → city, country
+        # Parse fullname -> city, country
         fullname = row.top_fullname or ""
         name_parts = [p.strip() for p in fullname.split(",")]
         city = name_parts[0] if name_parts else "Unknown"
         country = name_parts[-1] if len(name_parts) > 1 else (row.top_country_code or "")
         continent = COUNTRY_TO_CONTINENT.get(country, "Other")
 
-        # Process articles from SQL
+        # Process articles from SQL - keep title attached to each article
         all_articles = []
         all_headlines = []
-        seen_sources = set()
         for art in (row.articles or []):
             title = ""
             if art.get("title"):
@@ -697,52 +697,58 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
                         "object_type": parsed_count["object_type"],
                     }
 
-        # ── Event clustering ──
+        # Event clustering
         event_clusters = cluster_articles_by_event(all_articles, all_headlines)
 
+        # Build events array - each event has its own headlines + matched sources
+        events = []
         for cluster in event_clusters:
-            cl_articles = cluster["articles"]
             cl_headlines = cluster["headlines"]
+            cl_articles = cluster["articles"]
 
-            # Dedupe articles by source for display
-            display_articles = []
+            # Dedupe sources within this event
+            display_sources = []
             seen = set()
             for a in cl_articles:
-                if a["source"] and a["source"] not in seen:
-                    seen.add(a["source"])
-                    display_articles.append({
-                        "url": a["url"],
-                        "source": a["source"],
-                    })
-                if len(display_articles) >= 5:
+                src = a.get("source", "")
+                if src and src not in seen:
+                    seen.add(src)
+                    display_sources.append({"url": a["url"], "source": src})
+                if len(display_sources) >= 5:
                     break
 
-            if not display_articles and all_articles:
-                display_articles = [{"url": all_articles[0]["url"],
-                                     "source": all_articles[0]["source"]}]
+            if cl_headlines or display_sources:
+                events.append({
+                    "headlines": cl_headlines[:3],
+                    "sources": display_sources,
+                    "numSources": len(display_sources),
+                })
+                total_events += 1
 
-            n_sources = len(display_articles)
-            intensity_raw = n_sources * (1 + abs(avg_tone) / 10)
+        # Sort events by source count (most-covered first)
+        events.sort(key=lambda e: -e.get("numSources", 0))
 
-            hotspots.append({
-                "lat": lat,
-                "lng": lng,
-                "city": city,
-                "country": country,
-                "continent": continent,
-                "categories": categories,
-                "intensity_raw": intensity_raw,
-                "numSources": n_sources,
-                "articles": display_articles,
-                "headlines": cl_headlines[:5],
-                "metadata": {
-                    "persons": persons[:5],
-                    "themes": themes_raw[:8],
-                    "counts": count_agg,
-                    "avgTone": round(avg_tone, 2),
-                },
-            })
-            total_events += 1
+        # Location-level intensity based on total sources across all events
+        total_sources = sum(e.get("numSources", 0) for e in events)
+        intensity_raw = max(total_sources, 1) * (1 + abs(avg_tone) / 10)
+
+        hotspots.append({
+            "lat": lat,
+            "lng": lng,
+            "city": city,
+            "country": country,
+            "continent": continent,
+            "categories": categories,
+            "intensity_raw": intensity_raw,
+            "numSources": total_sources,
+            "events": events,
+            "metadata": {
+                "persons": persons[:5],
+                "themes": themes_raw[:8],
+                "counts": count_agg,
+                "avgTone": round(avg_tone, 2),
+            },
+        })
 
     # Normalize intensity
     if hotspots:
@@ -752,7 +758,7 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
             del h["intensity_raw"]
 
     hotspots.sort(key=lambda h: -h["intensity"])
-    print(f"  ✓ {len(rows):,} grid cells → {total_events:,} events")
+    print(f"  ✓ {len(rows):,} grid cells → {total_events:,} events across {len(hotspots):,} locations")
     return hotspots
 
 
@@ -780,28 +786,32 @@ def save_state(timestamp):
 
 def merge_hotspots(existing, new_data, max_age_hours=36):
     """
-    Merge new event hotspots into existing data.
-    Uses lat+lng+first_headline as key to identify same events.
+    Merge new location hotspots into existing data.
+    Uses lat+lng as key (one hotspot per grid cell).
+    Merges events arrays within locations.
     """
-    # Index existing by a compound key
     existing_map = {}
     for h in existing:
-        hl = (h.get("headlines") or [""])[0][:40]
-        key = f"{h['lat']},{h['lng']},{hl}"
+        key = f"{h['lat']},{h['lng']}"
         existing_map[key] = h
 
-    # Merge in new data
     for h in new_data:
-        hl = (h.get("headlines") or [""])[0][:40]
-        key = f"{h['lat']},{h['lng']},{hl}"
+        key = f"{h['lat']},{h['lng']}"
         if key in existing_map:
             old = existing_map[key]
-            # Merge articles (dedupe by source)
-            old_sources = {a.get("source") for a in old.get("articles", [])}
-            for a in h.get("articles", []):
-                if a.get("source") not in old_sources:
-                    old["articles"].append(a)
-            old["numSources"] = len(old.get("articles", []))
+            # Merge events (dedupe by first headline)
+            old_hls = set()
+            for ev in old.get("events", []):
+                if ev.get("headlines"):
+                    old_hls.add(ev["headlines"][0][:40])
+            for ev in h.get("events", []):
+                hl = (ev.get("headlines") or [""])[0][:40]
+                if hl and hl not in old_hls:
+                    old["events"].append(ev)
+                    old_hls.add(hl)
+            # Recalculate totals
+            old["numSources"] = sum(e.get("numSources", 0) for e in old.get("events", []))
+            old["events"].sort(key=lambda e: -e.get("numSources", 0))
         else:
             existing_map[key] = h
 
