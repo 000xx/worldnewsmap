@@ -918,16 +918,7 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
             if theme and theme not in themes_raw:
                 themes_raw.append(theme)
 
-        # Classify categories using all available signals
-        categories = classify_event(
-            themes_raw[:50],
-            count_agg,
-            avg_tone,
-            all_headlines,
-            sum(len(ev.get("sources", [])) for ev in events) if events else 1,
-        )
-
-        # Parse counts
+        # Parse counts (must happen before classification)
         count_agg = {}
         for count_str in (row.count_samples or []):
             if not count_str:
@@ -971,8 +962,17 @@ def collect_from_bigquery(since_hours=36, until_timestamp=None):
         # Sort events by source count (most-covered first)
         events.sort(key=lambda e: -e.get("numSources", 0))
 
-        # Location-level intensity based on total sources across all events
+        # Classify categories using all available signals (themes + counts + tone + headlines)
         total_sources = sum(e.get("numSources", 0) for e in events)
+        categories = classify_event(
+            themes_raw[:50],
+            count_agg,
+            avg_tone,
+            all_headlines,
+            total_sources,
+        )
+
+        # Location-level intensity based on total sources across all events
         intensity_raw = max(total_sources, 1) * (1 + abs(avg_tone) / 10)
 
         hotspots.append({
