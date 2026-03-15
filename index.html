@@ -243,7 +243,7 @@
 // CONFIG & STATE
 // ═══════════════════════════════════════════
 const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:1 };
-const GROQ_PROXY_URL = 'https://still-leaf-983b.milo-borek.workers.dev'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
+const GROQ_PROXY_URL = '__GROQ_PROXY_URL__'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const CC = {
   conflict:{b:'#ef4444',g:'rgba(239,68,68,.35)'},
@@ -331,12 +331,12 @@ function buildGroqContext(hs) {
   return parts.join('\n');
 }
 
-const HEADLINE_SYSTEM = `You are a neutral news headline writer. You will receive real article headlines and metadata about a single news event. Synthesize ONE factual headline of 10-20 words that captures the core event. Prioritize what the headlines actually say. Use metadata (persons, counts, tone) only to add precision, not to speculate. If headlines are missing, write a brief factual description from the metadata. No editorializing, no quotation marks, no sensationalism. Output ONLY the headline text, nothing else.`;
+const HEADLINE_SYSTEM = `You are a neutral news headline writer for an English-language audience. You will receive real article headlines and metadata about a single news event. Some headlines may be in languages other than English — translate them into English first, then synthesize. Write ONE factual headline of 10-20 words in English that captures the core event. Prioritize what the headlines actually say. Use metadata (persons, counts, tone) only to add precision, not to speculate. If headlines are missing, write a brief factual description from the metadata. No editorializing, no quotation marks, no sensationalism. Output ONLY the headline text in English, nothing else.`;
 
-const SUMMARY_SYSTEM = `You are a neutral news analyst. You will receive article headlines and metadata about a single news event. Write a factual 100-200 word summary of what is known. State what multiple sources report. Note where sources disagree if applicable. Do not speculate beyond what the headlines state. Do not editorialize. Use plain, clear language. Do not start with "Based on" or "According to the data".`;
+const SUMMARY_SYSTEM = `You are a neutral news analyst writing for an English-language audience. You will receive article headlines and metadata about a single news event. Some headlines may be in other languages — translate and incorporate them. Write a factual 100-200 word summary in English of what is known. State what multiple sources report. Note where sources disagree if applicable. Do not speculate beyond what the headlines state. Do not editorialize. Use plain, clear language. Do not start with "Based on" or "According to the data".`;
 
 async function groqCall(messages, maxTokens=60) {
-  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === 'https://still-leaf-983b.milo-borek.workers.dev') return null;
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') return null;
   if (groqRateLimited && Date.now() < groqRateLimitResetAt) return 'RATE_LIMITED';
 
   const resp = await fetch(GROQ_PROXY_URL, {
@@ -360,7 +360,7 @@ async function groqHeadline(pid, hs) {
   if (!el) return;
   const cacheKey = `hl:${hs.city||''},${(hs.headlines||[])[0]||pid}`;
   if (headlineCache[cacheKey]) { el.textContent = headlineCache[cacheKey]; el.className='event-headline'; return; }
-  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === 'https://still-leaf-983b.milo-borek.workers.dev') {
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') {
     el.textContent = hs.headlines?.[0] || '';
     el.className = 'event-headline';
     return;
