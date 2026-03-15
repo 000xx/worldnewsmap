@@ -62,35 +62,37 @@
     box-shadow:0 12px 40px rgba(0,0,0,.5)!important; min-width:240px; max-width:340px; }
   .leaflet-popup-tip { background:var(--card)!important; }
   .leaflet-popup-close-button { color:var(--dim)!important; font-size:16px!important; top:6px!important; right:8px!important; }
-  .popup-header { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
+  .popup-header { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
   .popup-city { font-family:'Space Mono',monospace; font-size:13px; font-weight:700; }
   .popup-country { font-size:10px; color:var(--dim); }
   .popup-badge { font-size:9px; font-weight:700; padding:2px 7px; border-radius:8px; color:#fff; text-transform:uppercase; letter-spacing:.3px; }
-  .popup-stats { display:flex; gap:10px; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid var(--border); }
-  .popup-stat { text-align:center; flex:1; }
-  .popup-stat-val { font-family:'Space Mono',monospace; font-size:14px; font-weight:700; }
-  .popup-stat-lbl { font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px; }
-  .popup-summary { font-size:11.5px; line-height:1.45; color:var(--dim); margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border); }
-  .popup-summary.loading { color:var(--muted); font-style:italic; }
-  .popup-summary.loading .summary-loading { display:inline-block; }
-  .popup-summary.loading .summary-loading::after {
-    content:''; display:inline-block; width:12px; text-align:left;
+
+  /* AI Headline — the hero element */
+  .popup-headline { font-size:13px; font-weight:600; line-height:1.4; color:var(--text);
+    margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border); min-height:18px; }
+  .popup-headline.loading { color:var(--muted); font-style:italic; font-weight:400; }
+  .popup-headline.loading .hl-loading::after {
+    content:''; display:inline-block; width:12px;
     animation:dots 1.2s steps(4,end) infinite; }
   @keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
-  .popup-summary.ai { color:var(--text); font-weight:500; }
-  .groq-btn { font-family:'DM Sans',sans-serif; font-size:10px; font-weight:600; padding:4px 10px;
-    border-radius:8px; border:1px solid var(--accent); background:rgba(59,130,246,.12); color:var(--accent);
-    cursor:pointer; transition:all .2s; display:inline-flex; align-items:center; gap:4px; margin-bottom:8px; }
-  .groq-btn:hover { background:rgba(59,130,246,.25); }
-  .groq-btn:disabled { opacity:.5; cursor:not-allowed; }
-  .groq-badge { font-size:8px; color:var(--muted); margin-top:2px; }
-  .popup-articles { list-style:none; }
-  .popup-articles li { margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid rgba(30,45,69,.4); }
-  .popup-articles li:last-child { border-bottom:none; margin-bottom:0; padding-bottom:0; }
-  .popup-articles a { color:var(--text); text-decoration:none; font-size:11.5px; line-height:1.35; display:block; transition:color .2s; }
-  .popup-articles a:hover { color:var(--accent); }
-  .popup-articles .src { font-size:9px; color:var(--muted); margin-top:1px; }
 
+  /* AI Summary — expandable */
+  .popup-summary { font-size:11px; line-height:1.5; color:var(--dim); margin-bottom:8px;
+    padding-bottom:8px; border-bottom:1px solid var(--border); }
+  .groq-btn { font-family:'DM Sans',sans-serif; font-size:10px; font-weight:600; padding:4px 10px;
+    border-radius:8px; border:1px solid rgba(59,130,246,.4); background:rgba(59,130,246,.08); color:var(--accent);
+    cursor:pointer; transition:all .2s; display:inline-flex; align-items:center; gap:4px; }
+  .groq-btn:hover { background:rgba(59,130,246,.2); border-color:var(--accent); }
+  .groq-badge { font-size:8px; color:var(--muted); margin-top:3px; }
+
+  /* Source links */
+  .popup-sources { list-style:none; }
+  .popup-sources li { padding:4px 0; border-bottom:1px solid rgba(30,45,69,.3); }
+  .popup-sources li:last-child { border-bottom:none; }
+  .popup-sources a { color:var(--accent); text-decoration:none; font-size:11px; font-weight:500; transition:color .15s; }
+  .popup-sources a:hover { color:#60a5fa; }
+  .popup-sources .src-arrow { color:var(--muted); font-size:9px; float:right; margin-top:2px; }
+  .popup-meta { font-size:9px; color:var(--muted); margin-top:6px; }
   /* Story list popup (heatmap mode) */
   .popup-story-list { list-style:none; max-height:260px; overflow-y:auto; }
   .popup-story-list li { padding:5px 0; border-bottom:1px solid rgba(30,45,69,.4); font-size:11px; line-height:1.35; }
@@ -229,7 +231,7 @@
 // CONFIG & STATE
 // ═══════════════════════════════════════════
 const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:1 };
-const GROQ_PROXY_URL = 'https://still-leaf-983b.milo-borek.workers.dev'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
+const GROQ_PROXY_URL = '__GROQ_PROXY_URL__'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const CC = {
   conflict:{b:'#ef4444',g:'rgba(239,68,68,.35)'},
@@ -253,16 +255,14 @@ function initMap(){
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19}).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
 
-  // Auto-fire Groq summary when any popup opens
+  // Auto-fire Groq headline when any popup opens
   map.on('popupopen', function(e) {
     const marker = e.popup._source;
-    if (marker && marker._hotspotData && marker._popupId) {
+    if (marker && marker._hotspotData && marker._popupId !== undefined) {
       const pid = marker._popupId;
       const hs = marker._hotspotData;
-      // Store ref for retry buttons
       window['_hs_' + pid] = hs;
-      // Small delay to let DOM render
-      setTimeout(() => groqSummarize(pid, hs), 50);
+      setTimeout(() => groqHeadline(pid, hs), 50);
     }
   });
 }
@@ -281,108 +281,110 @@ function lerp(a,b,t){
 }
 
 // ═══════════════════════════════════════════
-// GROQ AI SUMMARY (auto-fires on popup open)
+// GROQ AI — TWO-STAGE SYSTEM
+// Stage 1: headline (auto on popup open, ~60 tokens)
+// Stage 2: full summary (on button click, ~300 tokens)
 // ═══════════════════════════════════════════
+const headlineCache = {};
 const summaryCache = {};
 let groqRateLimited = false;
 let groqRateLimitResetAt = 0;
 
-function buildGroqContext(hotspot) {
-  const parts = [`Location: ${hotspot.city}, ${hotspot.country}`];
-  parts.push(`Categories: ${(hotspot.categories||[]).join(', ')}`);
-  parts.push(`Number of articles: ${hotspot.numArticles||0}`);
-  parts.push(`Average tone: ${hotspot.avgTone||0}`);
-  // Real article headlines — the most important context for generating a good summary
-  if (hotspot.headlines?.length) {
-    parts.push(`Article headlines from this location:\n- ${hotspot.headlines.slice(0,8).join('\n- ')}`);
+function buildGroqContext(hs) {
+  const parts = [`Location: ${hs.city}, ${hs.country}`];
+  if (hs.headlines?.length) {
+    parts.push(`Article headlines about this event:\n- ${hs.headlines.join('\n- ')}`);
   }
-  if (hotspot.persons?.length) parts.push(`Key people mentioned: ${hotspot.persons.join(', ')}`);
-  if (hotspot.counts && Object.keys(hotspot.counts).length) {
-    const cs = Object.entries(hotspot.counts).map(([k,v])=>`${v.number} ${k.toLowerCase()}${v.object_type?' ('+v.object_type+')':''}`);
-    parts.push(`Counts: ${cs.join(', ')}`);
+  const m = hs.metadata || {};
+  if (m.persons?.length) parts.push(`Key people: ${m.persons.join(', ')}`);
+  if (m.counts && Object.keys(m.counts).length) {
+    const cs = Object.entries(m.counts).map(([k,v])=>`${v.number} ${k.toLowerCase()}${v.object_type?' ('+v.object_type+')':''}`);
+    parts.push(`Reported counts: ${cs.join(', ')}`);
   }
-  if (hotspot.articles?.length) {
-    parts.push('Sources: ' + hotspot.articles.map(a=>a.source).filter(Boolean).join(', '));
-  }
+  if (m.categories?.length || hs.categories?.length) parts.push(`Categories: ${(hs.categories||m.categories||[]).join(', ')}`);
+  if (m.avgTone) parts.push(`Average media tone: ${m.avgTone}`);
+  if (hs.articles?.length) parts.push(`${hs.articles.length} sources: ${hs.articles.map(a=>a.source).filter(Boolean).join(', ')}`);
   return parts.join('\n');
 }
 
-async function groqSummarize(popupId, hotspot) {
-  const el = document.getElementById(popupId);
+const HEADLINE_SYSTEM = `You are a neutral news headline writer. You will receive real article headlines and metadata about a single news event. Synthesize ONE factual headline of 10-20 words that captures the core event. Prioritize what the headlines actually say. Use metadata (persons, counts, tone) only to add precision, not to speculate. If headlines are missing, write a brief factual description from the metadata. No editorializing, no quotation marks, no sensationalism. Output ONLY the headline text, nothing else.`;
+
+const SUMMARY_SYSTEM = `You are a neutral news analyst. You will receive article headlines and metadata about a single news event. Write a factual 100-200 word summary of what is known. State what multiple sources report. Note where sources disagree if applicable. Do not speculate beyond what the headlines state. Do not editorialize. Use plain, clear language. Do not start with "Based on" or "According to the data".`;
+
+async function groqCall(messages, maxTokens=60) {
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') return null;
+  if (groqRateLimited && Date.now() < groqRateLimitResetAt) return 'RATE_LIMITED';
+
+  const resp = await fetch(GROQ_PROXY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, max_tokens: maxTokens }),
+  });
+
+  if (resp.status === 429) {
+    groqRateLimited = true;
+    groqRateLimitResetAt = Date.now() + parseInt(resp.headers.get('Retry-After') || '60', 10) * 1000;
+    return 'RATE_LIMITED';
+  }
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.choices?.[0]?.message?.content?.trim() || null;
+}
+
+async function groqHeadline(pid, hs) {
+  const el = document.getElementById('hl-' + pid);
   if (!el) return;
-
-  // Cache hit — instant
-  const cacheKey = `${hotspot.lat},${hotspot.lng}`;
-  if (summaryCache[cacheKey]) {
-    el.innerHTML = summaryCache[cacheKey] + '<div class="groq-badge">AI summary via Groq</div>';
-    el.className = 'popup-summary ai';
+  const cacheKey = `hl:${hs.lat},${hs.lng},${(hs.headlines||[])[0]||''}`;
+  if (headlineCache[cacheKey]) { el.textContent = headlineCache[cacheKey]; el.className='popup-headline'; return; }
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') {
+    el.textContent = hs.headlines?.[0] || '';
+    el.className = 'popup-headline';
     return;
   }
 
-  // No proxy configured
-  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === 'https://still-leaf-983b.milo-borek.workers.dev') {
-    el.textContent = '';
-    el.className = 'popup-summary';
-    return;
-  }
-
-  // Rate limited — show countdown + retry
-  if (groqRateLimited && Date.now() < groqRateLimitResetAt) {
-    const secsLeft = Math.ceil((groqRateLimitResetAt - Date.now()) / 1000);
-    el.innerHTML = `<span style="color:var(--muted);font-size:10px">Rate limited — resets in ${secsLeft}s</span>
-      <button class="groq-btn" style="margin-top:4px" onclick="groqRateLimited=false;groqSummarize('${popupId}', window['_hs_${popupId}'])">⚡ Retry</button>`;
-    el.className = 'popup-summary';
-    return;
-  }
-  groqRateLimited = false;
-
-  // Show loading
-  el.innerHTML = '<span class="summary-loading">Generating summary…</span>';
-  el.className = 'popup-summary loading';
-
+  el.innerHTML = '<span class="hl-loading">Generating headline</span>';
+  el.className = 'popup-headline loading';
   try {
-    const resp = await fetch(GROQ_PROXY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [
-          { role: 'system', content: 'You are a neutral news headline writer. Given raw GDELT data about a location, write ONE unbiased factual headline of 10-20 words. No editorializing. No quotation marks. Just the headline text.' },
-          { role: 'user', content: buildGroqContext(hotspot) }
-        ],
-      })
-    });
-
-    // Handle rate limit
-    if (resp.status === 429) {
-      groqRateLimited = true;
-      const retryAfter = parseInt(resp.headers.get('Retry-After') || '60', 10);
-      groqRateLimitResetAt = Date.now() + retryAfter * 1000;
-      console.warn(`Groq rate limited, retry after ${retryAfter}s`);
-      if (document.getElementById(popupId)) {
-        document.getElementById(popupId).innerHTML = `<span style="color:var(--muted);font-size:10px">Rate limited — resets in ${retryAfter}s</span>
-          <button class="groq-btn" style="margin-top:4px" onclick="groqRateLimited=false;groqSummarize('${popupId}', window['_hs_${popupId}'])">⚡ Retry</button>`;
-        document.getElementById(popupId).className = 'popup-summary';
-      }
+    const result = await groqCall([
+      { role: 'system', content: HEADLINE_SYSTEM },
+      { role: 'user', content: buildGroqContext(hs) }
+    ], 60);
+    if (result === 'RATE_LIMITED') {
+      el.textContent = hs.headlines?.[0] || 'Rate limited';
+      el.className = 'popup-headline';
       return;
     }
+    const headline = result || hs.headlines?.[0] || '';
+    headlineCache[cacheKey] = headline;
+    el.textContent = headline;
+    el.className = 'popup-headline';
+  } catch(e) {
+    el.textContent = hs.headlines?.[0] || '';
+    el.className = 'popup-headline';
+  }
+}
 
-    const data = await resp.json();
-    if (data.error) {
-      throw new Error(data.error.message || 'API error');
+async function groqSummary(pid, hs) {
+  const el = document.getElementById('sum-' + pid);
+  if (!el) return;
+  const cacheKey = `sum:${hs.lat},${hs.lng},${(hs.headlines||[])[0]||''}`;
+  if (summaryCache[cacheKey]) { el.innerHTML = summaryCache[cacheKey]; return; }
+
+  el.innerHTML = '<span class="hl-loading" style="color:var(--muted);font-style:italic">Generating summary</span>';
+  try {
+    const result = await groqCall([
+      { role: 'system', content: SUMMARY_SYSTEM },
+      { role: 'user', content: buildGroqContext(hs) }
+    ], 350);
+    if (result === 'RATE_LIMITED') {
+      el.innerHTML = '<span style="color:var(--muted);font-size:10px">Rate limited — try again shortly</span>';
+      return;
     }
-    const summary = data.choices?.[0]?.message?.content?.trim() || 'Unable to generate summary';
-    summaryCache[cacheKey] = summary;
-    if (document.getElementById(popupId)) {
-      document.getElementById(popupId).innerHTML = summary + '<div class="groq-badge">AI summary via Groq</div>';
-      document.getElementById(popupId).className = 'popup-summary ai';
-    }
-  } catch (e) {
-    console.error('Groq error:', e);
-    if (document.getElementById(popupId)) {
-      document.getElementById(popupId).innerHTML = `<span style="color:var(--muted);font-size:10px">${e.message||'Summary unavailable'}</span>
-        <button class="groq-btn" style="margin-top:4px" onclick="groqSummarize('${popupId}', window['_hs_${popupId}'])">⚡ Retry</button>`;
-      document.getElementById(popupId).className = 'popup-summary';
-    }
+    const html = (result || 'Summary unavailable') + '<div class="groq-badge">AI analysis via Groq</div>';
+    summaryCache[cacheKey] = html;
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--muted);font-size:10px">${e.message||'Summary unavailable'}</span>`;
   }
 }
 
@@ -392,33 +394,16 @@ async function groqSummarize(popupId, hotspot) {
 let popupCounter = 0;
 function buildPopup(s){
   const bc=(CC[s.categories?.[0]]||DC).b;
-  const tl=s.avgTone>2?'▲ Pos':s.avgTone<-2?'▼ Neg':'● Neu';
-  const tc=s.avgTone>2?'#22d3ee':s.avgTone<-2?'#ef4444':'#8896b0';
-  const pid = 'sum-' + (popupCounter++);
+  const pid = popupCounter++;
 
-  // Counts display
-  let countsHtml = '';
-  if (s.counts && Object.keys(s.counts).length) {
-    const cs = Object.entries(s.counts).map(([k,v])=>{
-      const label = k.charAt(0)+k.slice(1).toLowerCase();
-      return `<span style="color:${k==='KILL'||k==='WOUND'?'#ef4444':'var(--dim)'}; font-size:10px">${v.number} ${label}</span>`;
-    });
-    countsHtml = `<div style="margin-bottom:6px">${cs.join(' · ')}</div>`;
-  }
+  // Source links
+  const sources = (s.articles||[]).map(a =>
+    `<li><a href="${a.url}" target="_blank">${a.source||'Source'}</a><span class="src-arrow">→</span></li>`
+  ).join('');
 
-  // Persons display
-  let personsHtml = '';
-  if (s.persons?.length) {
-    personsHtml = `<div style="font-size:10px; color:var(--muted); margin-bottom:6px">👤 ${s.persons.slice(0,3).join(', ')}</div>`;
-  }
+  const nSrc = (s.articles||[]).length;
 
-  // Articles — show real headline when available, fall back to source name
-  const arts=(s.articles||[]).map(a=>{
-    const displayTitle = a.title || a.source || 'Read article';
-    return `<li><a href="${a.url}" target="_blank">${displayTitle}</a><div class="src">${a.source}${a.tone?(' · Tone: '+(a.tone>0?'+':'')+a.tone):''}</div></li>`;
-  }).join('');
-
-  // Store hotspot data on window for Groq callback
+  // Store ref for Groq callbacks
   window['_hs_'+pid] = s;
 
   return `
@@ -426,13 +411,12 @@ function buildPopup(s){
       <div><div class="popup-city">${s.city}</div><div class="popup-country">${s.country}</div></div>
       <span class="popup-badge" style="background:${bc};margin-left:auto">${s.categories?.[0]||'news'}</span>
     </div>
-    <div class="popup-stats">
-      <div class="popup-stat"><div class="popup-stat-val">${s.numArticles||0}</div><div class="popup-stat-lbl">Articles</div></div>
-      <div class="popup-stat"><div class="popup-stat-val" style="color:${tc}">${tl}</div><div class="popup-stat-lbl">Tone</div></div>
+    <div id="hl-${pid}" class="popup-headline loading"><span class="hl-loading">Generating headline</span></div>
+    <div id="sum-${pid}">
+      <button class="groq-btn" onclick="groqSummary(${pid}, window['_hs_${pid}'])">▸ Get AI Summary</button>
     </div>
-    ${countsHtml}${personsHtml}
-    <div id="${pid}" class="popup-summary" style="min-height:20px"></div>
-    ${arts?'<ul class="popup-articles">'+arts+'</ul>':''}`;
+    ${sources?`<ul class="popup-sources">${sources}</ul>`:''}
+    <div class="popup-meta">${nSrc} source${nSrc!==1?'s':''}</div>`;
 }
 
 // ═══════════════════════════════════════════
@@ -451,10 +435,9 @@ function renderDots(data,filter){
     const m=L.circleMarker([s.lat,s.lng],{radius:Math.max(getR(s.intensity)*.5,3),
       fillColor:col.b,fillOpacity:.65,color:col.b,weight:1,opacity:.8});
     const popupContent = buildPopup(s);
-    m.bindPopup(popupContent,{maxWidth:340});
-    // Store hotspot data on marker for auto-summary
+    m.bindPopup(popupContent,{maxWidth:320,minWidth:240});
     m._hotspotData = s;
-    m._popupId = popupContent.match(/id="(sum-\d+)"/)?.[1];
+    m._popupId = popupCounter - 1;  // buildPopup incremented it
     ms.push(m);
   });
   cg.addLayers(ms);
@@ -483,7 +466,7 @@ function renderHeat(data,filter){
     g.stories.sort((a,b)=>b.intensity-a.intensity);
     const items=g.stories.map(s=>{
       const bc=(CC[s.categories?.[0]]||DC).b;
-      return `<li><span class="popup-badge" style="background:${bc};font-size:8px;padding:1px 5px;margin-right:3px">${s.categories?.[0]||''}</span><span style="color:var(--dim)">${s.city}</span> <span style="color:var(--muted);font-size:9px">(${s.numArticles||s.numSources||0})</span></li>`;
+      return `<li><span class="popup-badge" style="background:${bc};font-size:8px;padding:1px 5px;margin-right:3px">${s.categories?.[0]||''}</span><span style="color:var(--dim)">${s.headlines?.[0]||s.city}</span> <span style="color:var(--muted);font-size:9px">(${s.numSources||0})</span></li>`;
     }).join('');
     cm.bindPopup(`<div class="popup-header"><div><div class="popup-city">${g.stories[0]?.city||''}</div><div class="popup-country">${g.stories[0]?.country||''} — ${g.n} events</div></div></div><ul class="popup-story-list">${items}</ul>`,{maxWidth:380,maxHeight:320});
     markersLayer.addLayer(cm);
@@ -496,7 +479,7 @@ function renderHeat(data,filter){
 function updateStats(f){
   const countries=new Set(f.map(d=>d.country));
   document.getElementById('sEvents').textContent=f.length.toLocaleString();
-  document.getElementById('sSources').textContent=f.reduce((s,d)=>s+(d.numArticles||d.numSources||0),0).toLocaleString();
+  document.getElementById('sSources').textContent=f.reduce((s,d)=>s+(d.numSources||d.numArticles||0),0).toLocaleString();
   document.getElementById('sCountries').textContent=countries.size;
 }
 
@@ -516,7 +499,7 @@ async function loadData(){
     const r=await fetch(CONFIG.dataURL+'?t='+Date.now());
     const raw=await r.json();
     allData=(raw.hotspots||raw);
-    hotspotData=allData.filter(d=>(d.numArticles||d.numSources||0)>=CONFIG.minSrc);
+    hotspotData=allData.filter(d=>(d.numSources||d.numArticles||0)>=CONFIG.minSrc);
   }catch(e){console.error('Load failed:',e);hotspotData=allData=[];}
   render();
   updateLB();
@@ -536,7 +519,7 @@ function updateLB(){
   const el=document.getElementById('lbList');
   if(lbMode==='continent'){
     const m={};
-    f.forEach(d=>{const c=d.continent||'Other';if(!m[c])m[c]={n:0,s:0,co:new Set()};m[c].n++;m[c].s+=(d.numArticles||d.numSources||0);m[c].co.add(d.country);});
+    f.forEach(d=>{const c=d.continent||'Other';if(!m[c])m[c]={n:0,s:0,co:new Set()};m[c].n++;m[c].s+=(d.numSources||d.numArticles||0);m[c].co.add(d.country);});
     const sorted=Object.entries(m).map(([k,v])=>({name:k,n:v.n,s:v.s,co:v.co.size})).sort((a,b)=>b.n-a.n);
     const mx=sorted[0]?.n||1;
     el.innerHTML=sorted.map((c,i)=>`<div class="lb-row" data-cont="${c.name}"><span class="lb-rank">${i+1}</span><span class="lb-name">${c.name}</span><span class="lb-val">${c.n.toLocaleString()}</span><div class="lb-bar-bg"><div class="lb-bar" style="width:${c.n/mx*100}%"></div></div></div>`).join('');
@@ -579,7 +562,7 @@ document.getElementById('viewBtn').addEventListener('click',()=>{
 // Source slider
 document.getElementById('srcSlider').addEventListener('input',e=>{
   const v=parseInt(e.target.value);document.getElementById('srcVal').textContent=v;
-  CONFIG.minSrc=v;hotspotData=allData.filter(d=>(d.numArticles||d.numSources||0)>=v);render();updateLB();
+  CONFIG.minSrc=v;hotspotData=allData.filter(d=>(d.numSources||d.numArticles||0)>=v);render();updateLB();
 });
 // Leaderboard tabs
 document.querySelectorAll('.lb-tab').forEach(t=>{
