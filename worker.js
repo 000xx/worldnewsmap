@@ -22,7 +22,7 @@ const ALLOWED_ORIGINS = [
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const ALLOWED_MODEL = 'llama-3.3-70b-versatile';
-const MAX_TOKENS = 60;
+const MAX_TOKENS_LIMIT = 400;
 
 export default {
   async fetch(request, env) {
@@ -57,11 +57,12 @@ export default {
     }
 
     // Force safe parameters — prevent abuse
+    const requestedTokens = parseInt(body.max_tokens) || 60;
     const groqBody = {
       model: ALLOWED_MODEL,
       messages: body.messages.slice(0, 2), // max 2 messages (system + user)
-      max_tokens: MAX_TOKENS,
-      temperature: 0.3,
+      max_tokens: Math.min(requestedTokens, MAX_TOKENS_LIMIT),
+      temperature: body.temperature || 0.3,
     };
 
     // Forward to Groq
