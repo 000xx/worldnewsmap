@@ -412,9 +412,6 @@ function buildPopup(s){
       <span class="popup-badge" style="background:${bc};margin-left:auto">${s.categories?.[0]||'news'}</span>
     </div>
     <div id="hl-${pid}" class="popup-headline loading"><span class="hl-loading">Generating headline</span></div>
-    <div id="sum-${pid}">
-      <button class="groq-btn" onclick="groqSummary(${pid}, window['_hs_${pid}'])">▸ Get AI Summary</button>
-    </div>
     ${sources?`<ul class="popup-sources">${sources}</ul>`:''}
     <div class="popup-meta">${nSrc} source${nSrc!==1?'s':''}</div>`;
 }
