@@ -42,6 +42,7 @@
   .cat-btn[data-cat="humanitarian"].active { background:#f59e0b; }
   .cat-btn[data-cat="health"].active { background:#ec4899; }
   .cat-btn[data-cat="positive"].active { background:#22d3ee; }
+  .cat-btn[data-cat="science_tech"].active { background:#6366f1; }
   .view-toggle { border-color:var(--accent)!important; color:var(--accent)!important; margin-left:4px; }
 
   /* Source slider */
@@ -198,6 +199,7 @@
     <button class="cat-btn" data-cat="environment">Environment</button>
     <button class="cat-btn" data-cat="humanitarian">Humanitarian</button>
     <button class="cat-btn" data-cat="health">Health</button>
+    <button class="cat-btn" data-cat="science_tech">Sci/Tech</button>
     <button class="cat-btn" data-cat="positive">Positive</button>
     <button class="cat-btn view-toggle" id="viewBtn">⬡ DOTS</button>
     <div class="slider-wrap">
@@ -243,7 +245,7 @@
 // CONFIG & STATE
 // ═══════════════════════════════════════════
 const CONFIG = { dataURL:'./data/live.json', refreshMs:15*60*1000, minSrc:1 };
-const GROQ_PROXY_URL = 'https://still-leaf-983b.milo-borek.workers.dev'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
+const GROQ_PROXY_URL = '__GROQ_PROXY_URL__'; // e.g. https://newsmap-groq-proxy.YOUR_SUBDOMAIN.workers.dev
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const CC = {
   conflict:{b:'#ef4444',g:'rgba(239,68,68,.35)'},
@@ -252,6 +254,7 @@ const CC = {
   environment:{b:'#06b6d4',g:'rgba(6,182,212,.35)'},
   humanitarian:{b:'#f59e0b',g:'rgba(245,158,11,.35)'},
   health:{b:'#ec4899',g:'rgba(236,72,153,.35)'},
+  science_tech:{b:'#6366f1',g:'rgba(99,102,241,.35)'},
   positive:{b:'#22d3ee',g:'rgba(34,211,238,.35)'},
 };
 const DC = {b:'#3b82f6',g:'rgba(59,130,246,.35)'};
@@ -336,7 +339,7 @@ const HEADLINE_SYSTEM = `You are a neutral news headline writer for an English-l
 const SUMMARY_SYSTEM = `You are a neutral news analyst writing for an English-language audience. You will receive article headlines and metadata about a single news event. Some headlines may be in other languages — translate and incorporate them. Write a factual 100-200 word summary in English of what is known. State what multiple sources report. Note where sources disagree if applicable. Do not speculate beyond what the headlines state. Do not editorialize. Use plain, clear language. Do not start with "Based on" or "According to the data".`;
 
 async function groqCall(messages, maxTokens=60) {
-  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === 'https://still-leaf-983b.milo-borek.workers.dev') return null;
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') return null;
   if (groqRateLimited && Date.now() < groqRateLimitResetAt) return 'RATE_LIMITED';
 
   const resp = await fetch(GROQ_PROXY_URL, {
@@ -360,7 +363,7 @@ async function groqHeadline(pid, hs) {
   if (!el) return;
   const cacheKey = `hl:${hs.city||''},${(hs.headlines||[])[0]||pid}`;
   if (headlineCache[cacheKey]) { el.textContent = headlineCache[cacheKey]; el.className='event-headline'; return; }
-  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === 'https://still-leaf-983b.milo-borek.workers.dev') {
+  if (!GROQ_PROXY_URL || GROQ_PROXY_URL === '__GROQ_PROXY_URL__') {
     el.textContent = hs.headlines?.[0] || '';
     el.className = 'event-headline';
     return;
